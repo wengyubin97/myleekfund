@@ -340,6 +340,11 @@ async function handleZhutiRewrite(req: any, res: any, targetBase: string) {
     </style>
   `;
   $('head').append(darkThemeCSS);
+
+  // 股票走势窗口的灰度（黑白）配色：仅对带 leekGrayscale=1 标记的页面生效
+  if ((req.url || '').includes('leekGrayscale=1')) {
+    $('head').append(`<style>html, body { filter: grayscale(100%) !important; }</style>`);
+  }
   
   const out = $.html();
   // 添加 CORS 头，允许 iframe 嵌入
