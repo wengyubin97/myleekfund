@@ -209,6 +209,28 @@ function drawDot(
   }
 }
 
+/** 画连续线段（按步长插值，保证曲线不出现断点） */
+function drawLine(
+  rgba: Buffer,
+  width: number,
+  height: number,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  color: [number, number, number]
+) {
+  const steps = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+  for (let i = 0; i <= steps; i++) {
+    const t = steps === 0 ? 0 : i / steps;
+    const x = Math.round(x0 + (x1 - x0) * t);
+    const y = Math.round(y0 + (y1 - y0) * t);
+    setPixel(rgba, width, height, x, y, color, 255);
+    setPixel(rgba, width, height, x, y + 1, color, 255);
+    setPixel(rgba, width, height, x, y - 1, color, 255);
+  }
+}
+
 /* ---------- 5x7 位图字体（数字、符号、MAX/MIN） ---------- */
 
 const FONT_5X7: Record<string, Array<string>> = {
@@ -337,16 +359,17 @@ export function renderChartPng(curve: Array<CurvePoint>, width = 420, height = 1
   }
 
   // 折线
-  for (let x = leftPad; x < width - padding; x++) {
-    const idx = ((x - leftPad) / chartW) * (N - 1);
-    const i0 = Math.floor(idx);
-    const i1 = Math.min(N - 1, i0 + 1);
-    const frac = idx - i0;
-    const pct = pcts[i0] * (1 - frac) + pcts[i1] * frac;
-    const y = toY(pct);
-    setPixel(rgba, width, height, x, y, color, 255);
-    setPixel(rgba, width, height, x, y + 1, color, 255);
-    setPixel(rgba, width, height, x, y - 1, color, 255);
+  for (let i = 0; i < N - 1; i++) {
+    drawLine(
+      rgba,
+      width,
+      height,
+      Math.round(toX(i)),
+      toY(pcts[i]),
+      Math.round(toX(i + 1)),
+      toY(pcts[i + 1]),
+      color
+    );
   }
 
   // 当前点
