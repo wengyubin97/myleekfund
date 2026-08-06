@@ -6,7 +6,7 @@ import { DEFAULT_LABEL_FORMAT } from '../shared/constant';
 import { LeekFundConfig } from '../shared/leekConfig';
 import { LeekTreeItem } from '../shared/leekTreeItem';
 import { calcStockGroupAvgPercent, events, formatLabelString } from '../shared/utils';
-import { buildGroupChartDataUri, isMinuteSupported } from './groupChart';
+import { buildGroupChartDataUri, getStockChartDataUri, isMinuteSupported } from './groupChart';
 
 function joinMarkdownLines(lines: Array<string>): string {
   return lines.join('  \n');
@@ -216,7 +216,7 @@ export class StatusBar {
     baseLines: Array<string>
   ) {
     try {
-      const dataUri = await buildGroupChartDataUri([code]);
+      const dataUri = await getStockChartDataUri(code);
       if (!dataUri) {
         return;
       }

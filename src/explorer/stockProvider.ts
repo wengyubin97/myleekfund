@@ -5,6 +5,7 @@ import { LeekTreeItem } from '../shared/leekTreeItem';
 import { defaultFundInfo, SortType, StockCategory } from '../shared/typed';
 import { LeekFundConfig } from '../shared/leekConfig';
 import { calcStockGroupAvgPercent } from '../shared/utils';
+import { enrichStockTooltips } from '../statusbar/groupChart';
 import StockService from './stockService';
 
 export class StockProvider implements TreeDataProvider<LeekTreeItem> {
@@ -40,6 +41,8 @@ export class StockProvider implements TreeDataProvider<LeekTreeItem> {
       const stockCodes = LeekFundConfig.getConfig('leek-fund.stocks') || [];
       // const stockList: string[] = uniq(compact(flattenDeep(stockCodes)));
       return this.service.getData(stockCodes, this.order).then(() => {
+        // 异步给树节点 tooltip 追加分时图
+        enrichStockTooltips(this.service.stockList);
         return this.getRootNodes();
       });
     } else {
@@ -187,8 +190,8 @@ export class StockProvider implements TreeDataProvider<LeekTreeItem> {
   getStockGroupNodes(groupId: string): Promise<LeekTreeItem[]> {
     const index: number = parseInt((groupId || '').replace('stockGroup_', ''));
     const codes: Array<string> = globalState.stockGroupStocks[index] || [];
-    return Promise.resolve(this.service.stockList || []).then((list) =>
-      list
+    return Promise.resolve(this.service.stockList || []).then((list) => {
+      const clones = list
         .filter((item: LeekTreeItem) => codes.includes(item.info.code))
         .map((item: LeekTreeItem) => {
           const clone = Object.create(Object.getPrototypeOf(item)) as LeekTreeItem;
@@ -196,8 +199,10 @@ export class StockProvider implements TreeDataProvider<LeekTreeItem> {
           clone.id = `${groupId}_${item.info.code}`;
           clone.contextValue = 'stockGroupItem';
           return clone;
-        })
-    );
+        });
+      enrichStockTooltips(clones);
+      return clones;
+    });
   }
   getAStockNodes(stocks: Promise<LeekTreeItem[]>): Promise<LeekTreeItem[]> {
     const aStocks: Promise<LeekTreeItem[]> = stocks.then((res: LeekTreeItem[]) => {

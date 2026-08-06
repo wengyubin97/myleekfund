@@ -1,8 +1,12 @@
 import axios from 'axios';
 import * as zlib from 'zlib';
+import { MarkdownString } from 'vscode';
+import { LeekTreeItem } from '../shared/leekTreeItem';
 
 const MINUTE_QUERY = 'https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=';
 const CACHE_TTL = 30000; // 分钟数据缓存 30 秒
+const RENDER_TTL = 30000; // 渲染图缓存 30 秒
+const FETCH_CONCURRENCY = 6; // 分钟数据请求并发数
 
 export interface MinuteRecord {
   code: string;
@@ -38,6 +42,7 @@ export function parseMinuteResponse(code: string, body: any): MinuteRecord | nul
 }
 
 let minuteCache: { key: string; data: Map<string, MinuteRecord>; time: number } | null = null;
+const renderedUriCache = new Map<string, { time: number; uri: string | null }>();
 
 /** 是否有分时数据接口（A股/港股/美股） */
 export function isMinuteSupported(code: string): boolean {
@@ -64,8 +69,10 @@ export async function fetchMinuteData(codes: Array<string>): Promise<Map<string,
     return minuteCache.data;
   }
 
-  await Promise.all(
-    supported.map(async (code) => {
+  let index = 0;
+  const worker = async () => {
+    while (index < supported.length) {
+      const code = supported[index++];
       try {
         const queryCode = toMinuteQueryCode(code);
         const resp = await axios.get(`${MINUTE_QUERY}${queryCode}`, {
@@ -83,7 +90,10 @@ export async function fetchMinuteData(codes: Array<string>): Promise<Map<string,
       } catch (err) {
         console.error(`fetch minute data failed: ${code}`, err);
       }
-    })
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(FETCH_CONCURRENCY, supported.length) }, () => worker())
   );
 
   minuteCache = { key: supported.join(','), data: map, time: Date.now() };
@@ -369,20 +379,20 @@ export function renderChartPng(curve: Array<CurvePoint>, width = 420, height = 1
   return encodePng(width, height, rgba);
 }
 
-/**
- * 生成等权分时图的 data URI（内嵌 base64 PNG）。
- * VS Code 悬浮提示会拦截本地/非 https 图片链接，data URI 是可行的方案。
- * 不支持分时数据的市场会被过滤掉，全部不支持或拉取失败时返回 null。
- */
-export async function buildGroupChartDataUri(codes: Array<string>): Promise<string | null> {
+/** 获取多只股票的分钟记录（自动过滤不支持的市场，含 30 秒缓存） */
+export async function getMinuteRecords(codes: Array<string>): Promise<Array<MinuteRecord>> {
   const supported = codes.filter(isMinuteSupported);
   if (!supported.length) {
-    return null;
+    return [];
   }
   const map = await fetchMinuteData(supported);
-  const records = supported
+  return supported
     .map((code) => map.get(code))
     .filter((record): record is MinuteRecord => !!record);
+}
+
+/** 把分钟记录渲染成等权分时图 data URI（内嵌 base64 PNG） */
+export function renderRecordsToUri(records: Array<MinuteRecord>): string | null {
   if (!records.length) {
     return null;
   }
@@ -392,4 +402,70 @@ export async function buildGroupChartDataUri(codes: Array<string>): Promise<stri
   }
   const png = renderChartPng(curve);
   return `data:image/png;base64,${png.toString('base64')}`;
+}
+
+/**
+ * 生成等权分时图的 data URI。
+ * VS Code 悬浮提示会拦截本地/非 https 图片链接，data URI 是可行的方案。
+ */
+export async function buildGroupChartDataUri(codes: Array<string>): Promise<string | null> {
+  const records = await getMinuteRecords(codes);
+  return renderRecordsToUri(records);
+}
+
+/** 获取单只股票的分时图 data URI（带 30 秒渲染缓存） */
+export async function getStockChartDataUri(code: string): Promise<string | null> {
+  const now = Date.now();
+  const cached = renderedUriCache.get(code);
+  if (cached && now - cached.time < RENDER_TTL) {
+    return cached.uri;
+  }
+  const records = await getMinuteRecords([code]);
+  const uri = renderRecordsToUri(records);
+  renderedUriCache.set(code, { time: now, uri });
+  return uri;
+}
+
+/** 批量给树节点/列表项的 tooltip 追加分时图（渲染图带 30 秒缓存） */
+export async function enrichStockTooltips(items: Array<LeekTreeItem>): Promise<void> {
+  if (!items || !items.length) {
+    return;
+  }
+  const codes = Array.from(
+    new Set(items.map((item) => item.info.code).filter(isMinuteSupported))
+  );
+  if (!codes.length) {
+    return;
+  }
+  const now = Date.now();
+  const needRender = codes.filter((code) => {
+    const cached = renderedUriCache.get(code);
+    return !cached || now - cached.time >= RENDER_TTL;
+  });
+  if (needRender.length) {
+    const records = await getMinuteRecords(needRender);
+    const recordMap = new Map(records.map((record) => [record.code, record]));
+    needRender.forEach((code) => {
+      const record = recordMap.get(code);
+      renderedUriCache.set(code, {
+        time: now,
+        uri: record ? renderRecordsToUri([record]) : null,
+      });
+    });
+  }
+  items.forEach((item) => {
+    if (!isMinuteSupported(item.info.code)) {
+      return;
+    }
+    const cached = renderedUriCache.get(item.info.code);
+    if (!cached || !cached.uri) {
+      return;
+    }
+    const current = item.tooltip;
+    let base =
+      current instanceof MarkdownString ? current.value : String(current || '');
+    // 移除旧的分时图，避免重复追加
+    base = base.replace(/\n+!\[分时图\]\(data:image\/png;base64,[^)]+\)/g, '').trim();
+    item.tooltip = new MarkdownString(`${base}\n\n![分时图](${cached.uri})`);
+  });
 }
