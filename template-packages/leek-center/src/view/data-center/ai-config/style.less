@@ -1,0 +1,69 @@
+.ai-config-page {
+  padding: 20px;
+  display: flex;
+  justify-content: center;
+
+  .config-card {
+    width: 100%;
+    max-width: 720px;
+    border-radius: 8px;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03), 0 1px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px 0 rgba(0, 0, 0, 0.02);
+
+    .ant-card-head {
+      border-bottom: 1px solid var(--vscode-editorWidget-border, #f0f0f0);
+      color: var(--vscode-foreground);
+    }
+
+    .ant-card-body {
+      background: var(--vscode-editorWidget-background);
+    }
+    .ant-form-item-extra{
+      color: #ccc;
+    }
+  }
+
+  .desc {
+    color: var(--vscode-descriptionForeground, #777);
+    margin-bottom: 24px;
+  }
+
+  .actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0;
+  }
+}
+
+body {
+  .ant-select-selector {
+    background-color: var(--vscode-input-background) !important;
+    color: var(--vscode-input-foreground) !important;
+    border-color: var(--vscode-input-border, #d9d9d9) !important;
+  }
+
+  .ant-select-selection-placeholder {
+    color: var(--vscode-input-placeholderForeground) !important;
+  }
+
+  .ant-select-arrow {
+    color: var(--vscode-foreground) !important;
+  }
+
+  .ant-select-dropdown {
+    background-color: var(--vscode-editorWidget-background) !important;
+    border-color: var(--vscode-editorWidget-border, #d9d9d9) !important;
+
+    .ant-select-item {
+      color: var(--vscode-foreground) !important;
+
+      &:hover {
+        background-color: var(--vscode-list-hoverBackground) !important;
+      }
+
+      &.ant-select-item-option-selected {
+        background-color: var(--vscode-list-activeSelectionBackground) !important;
+        color: var(--vscode-list-activeSelectionForeground) !important;
+      }
+    }
+  }
+}
