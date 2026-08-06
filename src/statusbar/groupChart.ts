@@ -39,9 +39,17 @@ export function parseMinuteResponse(code: string, body: any): MinuteRecord | nul
 
 let minuteCache: { key: string; data: Map<string, MinuteRecord>; time: number } | null = null;
 
-/** 是否有分时数据接口（A股/港股） */
+/** 是否有分时数据接口（A股/港股/美股） */
 export function isMinuteSupported(code: string): boolean {
-  return /^(sh|sz|bj|hk)/.test(code);
+  return /^(sh|sz|bj|hk|usr_)/.test(code);
+}
+
+/** 内部代码转腾讯分钟线接口代码（美股 usr_xxx -> usXXX） */
+export function toMinuteQueryCode(code: string): string {
+  if (/^usr_/.test(code)) {
+    return 'us' + code.substring(4).toUpperCase();
+  }
+  return code;
 }
 
 /** 拉取多只股票的分钟数据（含昨收，用于归一化） */
@@ -59,7 +67,8 @@ export async function fetchMinuteData(codes: Array<string>): Promise<Map<string,
   await Promise.all(
     supported.map(async (code) => {
       try {
-        const resp = await axios.get(`${MINUTE_QUERY}${code}`, {
+        const queryCode = toMinuteQueryCode(code);
+        const resp = await axios.get(`${MINUTE_QUERY}${queryCode}`, {
           headers: {
             'User-Agent': 'Mozilla/5.0',
             Referer: 'https://gu.qq.com/',
@@ -67,9 +76,9 @@ export async function fetchMinuteData(codes: Array<string>): Promise<Map<string,
           timeout: 8000,
         });
         const body: any = resp.data;
-        const record = parseMinuteResponse(code, body);
+        const record = parseMinuteResponse(queryCode, body);
         if (record) {
-          map.set(code, record);
+          map.set(code, { ...record, code });
         }
       } catch (err) {
         console.error(`fetch minute data failed: ${code}`, err);
@@ -378,6 +387,9 @@ export async function buildGroupChartDataUri(codes: Array<string>): Promise<stri
     return null;
   }
   const curve = buildEqualWeightCurve(records);
+  if (curve.length < 2) {
+    return null;
+  }
   const png = renderChartPng(curve);
   return `data:image/png;base64,${png.toString('base64')}`;
 }

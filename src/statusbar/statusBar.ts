@@ -8,19 +8,6 @@ import { LeekTreeItem } from '../shared/leekTreeItem';
 import { calcStockGroupAvgPercent, events, formatLabelString } from '../shared/utils';
 import { buildGroupChartDataUri, isMinuteSupported } from './groupChart';
 
-/**
- * 获取新浪分时图图片地址（A股/港股），其他市场暂无分时图接口
- */
-function getStockMinChartUrl(code: string): string | null {
-  if (/^(sh|sz|bj)/.test(code)) {
-    return `https://image.sinajs.cn/newchart/min/n/${code}.gif`;
-  }
-  if (/^hk/.test(code)) {
-    return `https://image.sinajs.cn/newchart/hk_stock/min/${code.substring(2)}.gif`;
-  }
-  return null;
-}
-
 function joinMarkdownLines(lines: Array<string>): string {
   return lines.join('  \n');
 }
@@ -209,11 +196,9 @@ export class StatusBar {
       mdLines.push(heldText.trim());
     }
     mdLines.push(`成交额：${amount}`, `更新时间：${item.info?.time}`);
-    const chartUrl = getStockMinChartUrl(code);
-    if (chartUrl) {
-      mdLines.push('', `![分时图](${chartUrl})`);
-    }
     stockBarItem.tooltip = new MarkdownString(joinMarkdownLines(mdLines));
+    // 异步渲染当前分时图（data URI 内嵌，与分组图一致，含零轴/最高/最低标注）
+    this.updateStockChartTooltip(stockBarItem, code, mdLines);
     stockBarItem.color = deLow ? this.riseColor : this.fallColor;
     stockBarItem.command = {
       title: 'Change stock',
@@ -223,6 +208,24 @@ export class StatusBar {
 
     stockBarItem.show();
     return stockBarItem;
+  }
+
+  async updateStockChartTooltip(
+    stockBarItem: StatusBarItem,
+    code: string,
+    baseLines: Array<string>
+  ) {
+    try {
+      const dataUri = await buildGroupChartDataUri([code]);
+      if (!dataUri) {
+        return;
+      }
+      const lines = baseLines.slice();
+      lines.push('', '![分时图](' + dataUri + ')');
+      stockBarItem.tooltip = new MarkdownString(joinMarkdownLines(lines));
+    } catch (err) {
+      console.error('update stock chart tooltip error:', err);
+    }
   }
 
   refreshStockGroupStatusBar() {
