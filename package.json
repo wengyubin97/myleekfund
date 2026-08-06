@@ -257,6 +257,10 @@
         "title": "从分组移除"
       },
       {
+        "command": "leek-fund.openTrendChart",
+        "title": "打开交互分时图"
+      },
+      {
         "command": "leek-fund.addStockGroupToBar",
         "title": "添加分组至状态栏"
       },
@@ -582,6 +586,16 @@
           "command": "leek-fund.removeStockFromGroup",
           "when": "view == leekFundView.stock && viewItem == stockGroupItem",
           "group": "group6"
+        },
+        {
+          "command": "leek-fund.openTrendChart",
+          "when": "view == leekFundView.stock && (viewItem == aStock || viewItem == hkStock || viewItem == stockGroupItem)",
+          "group": "group2"
+        },
+        {
+          "command": "leek-fund.openTrendChart",
+          "when": "view == leekFundView.stock && viewItem == stockGroup",
+          "group": "group2"
         },
         {
           "command": "leek-fund.renameStockGroup",

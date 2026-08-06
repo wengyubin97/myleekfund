@@ -54,6 +54,7 @@ import tucaoForum from './webview/tucaoForum';
 import { StatusBar } from './statusbar/statusBar';
 import binanceTrend from './webview/binanceTrend';
 import { AiConfigView } from './webview/ai-config';
+import { openTrendChart } from './webview/trendChart';
 
 export function registerViewEvent(
   context: ExtensionContext,
@@ -322,6 +323,25 @@ export function registerViewEvent(
       LeekFundConfig.removeStockFromGroupCfg(target.id, () => {
         stockProvider.refresh();
       });
+    })
+  );
+  context.subscriptions.push(
+    commands.registerCommand('leek-fund.openTrendChart', (target) => {
+      if (!target || !target.id) {
+        return;
+      }
+      if (target.id.startsWith('stockGroup_')) {
+        const index: number = parseInt(target.id.replace('stockGroup_', ''));
+        const codes: Array<string> = globalState.stockGroupStocks[index] || [];
+        const name = globalState.stockGroups[index] || '分组';
+        openTrendChart(codes, `分时图 - ${name}`);
+      } else {
+        const code = LeekFundConfig.parseStockCode(target.id) || target.info?.code;
+        if (!code) {
+          return;
+        }
+        openTrendChart([code], `分时图 - ${target.info?.name || code}`);
+      }
     })
   );
   context.subscriptions.push(
