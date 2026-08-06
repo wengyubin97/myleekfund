@@ -315,7 +315,7 @@ export function renderChartPng(curve: Array<CurvePoint>, width = 420, height = 1
 
   // 网格线 + 零轴
   const gridColor: [number, number, number] = [255, 255, 255];
-  for (let x = leftPad; x < width - padding; x++) {
+  for (let x = 2; x < width - padding; x++) {
     if (x % 2 === 0) {
       setPixel(rgba, width, height, x, Math.round(midY), gridColor, 70);
     }
@@ -357,7 +357,8 @@ export function renderChartPng(curve: Array<CurvePoint>, width = 420, height = 1
   const minPct = Math.min(...pcts);
   const maxLineY = toY(maxPct);
   const minLineY = toY(minPct);
-  for (let x = leftPad; x < width - padding; x++) {
+  // 虚线延伸到左侧数字区，与标注对齐
+  for (let x = 2; x < width - padding; x++) {
     if (x % 2 === 0) {
       setPixel(rgba, width, height, x, maxLineY, gridColor, 110);
       setPixel(rgba, width, height, x, minLineY, gridColor, 110);
@@ -365,17 +366,28 @@ export function renderChartPng(curve: Array<CurvePoint>, width = 420, height = 1
   }
   const textColor: [number, number, number] = [255, 255, 255];
   const formatPct = (value: number) => `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
-  drawLabel(rgba, width, height, 4, 4, `MAX ${formatPct(maxPct)}`, textColor);
+  // 数字垂直居中于各自横线，避免越界
+  const clampY = (y: number) => Math.max(2, Math.min(height - FONT_H - 2, y));
+  const labelOffset = Math.floor(FONT_H / 2);
   drawLabel(
     rgba,
     width,
     height,
     4,
-    height - 4 - FONT_H,
+    clampY(maxLineY - labelOffset),
+    `MAX ${formatPct(maxPct)}`,
+    textColor
+  );
+  drawLabel(
+    rgba,
+    width,
+    height,
+    4,
+    clampY(minLineY - labelOffset),
     `MIN ${formatPct(minPct)}`,
     textColor
   );
-  drawLabel(rgba, width, height, 4, midY - FONT_H - 3, '0', textColor);
+  drawLabel(rgba, width, height, 4, clampY(Math.round(midY) - labelOffset), '0', textColor);
   return encodePng(width, height, rgba);
 }
 
