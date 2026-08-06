@@ -13,6 +13,70 @@ const COLOR_GRAY: [number, number, number] = [150, 150, 150];
 const COLOR_UP: [number, number, number] = [240, 82, 82];
 const COLOR_DOWN: [number, number, number] = [64, 175, 84];
 
+export type TrendSignal = {
+  level: 'extreme' | 'fast';
+  direction: 'up' | 'down';
+} | null;
+
+/** 时间字符串（HHMM）转分钟数 */
+function minuteOf(time: string): number {
+  const h = parseInt(time.slice(0, 2), 10);
+  const m = parseInt(time.slice(2, 4), 10);
+  return (isNaN(h) ? 0 : h) * 60 + (isNaN(m) ? 0 : m);
+}
+
+/** 根据曲线最后一段的速度/方向判定信号（时间缺口不判定） */
+export function getCurveSignal(curve: Array<CurvePoint>): TrendSignal {
+  if (curve.length < 2) {
+    return null;
+  }
+  const prev = curve[curve.length - 2];
+  const last = curve[curve.length - 1];
+  if (minuteOf(last.time) - minuteOf(prev.time) > 1) {
+    return null;
+  }
+  const diffPct = last.pct - prev.pct;
+  const speed = Math.abs(diffPct);
+  if (speed < FAST_MOVE_THRESHOLD) {
+    return null;
+  }
+  const direction = diffPct > 0 ? 'up' : 'down';
+  const level = speed >= FULL_SAT_SPEED ? 'extreme' : 'fast';
+  return { level, direction };
+}
+
+/** 信号的中文提示文案 */
+export function signalLabel(signal: TrendSignal): string {
+  if (!signal) {
+    return '';
+  }
+  if (signal.level === 'extreme') {
+    return signal.direction === 'up' ? '⚡ 极速拉升' : '⚡ 极速下杀';
+  }
+  return signal.direction === 'up' ? '⚠ 快速拉升' : '⚠ 快速下杀';
+}
+
+const signalCache = new Map<string, { time: number; signal: TrendSignal }>();
+
+async function getSignalFor(codes: Array<string>): Promise<TrendSignal> {
+  const key = codes.join(',');
+  const now = Date.now();
+  const cached = signalCache.get(key);
+  if (cached && now - cached.time < RENDER_TTL) {
+    return cached.signal;
+  }
+  const records = await getMinuteRecords(codes);
+  const curve = buildEqualWeightCurve(records);
+  const signal = getCurveSignal(curve);
+  signalCache.set(key, { time: now, signal });
+  return signal;
+}
+
+export const getStockSignal = (code: string): Promise<TrendSignal> => getSignalFor([code]);
+
+export const getGroupSignal = (codes: Array<string>): Promise<TrendSignal> =>
+  getSignalFor(codes);
+
 export interface MinuteRecord {
   code: string;
   prevClose: number;
@@ -258,6 +322,14 @@ const FONT_5X7: Record<string, Array<string>> = {
   X: ['10001', '10001', '01010', '00100', '01010', '10001', '10001'],
   I: ['01110', '00100', '00100', '00100', '00100', '00100', '01110'],
   N: ['10001', '11001', '10101', '10011', '10001', '10001', '10001'],
+  S: ['01110', '10001', '10000', '01110', '00001', '10001', '01110'],
+  P: ['11110', '10001', '10001', '11110', '10000', '10000', '10000'],
+  K: ['10001', '10010', '10100', '11000', '10100', '10010', '10001'],
+  E: ['11111', '10000', '10000', '11110', '10000', '10000', '11111'],
+  U: ['10001', '10001', '10001', '10001', '10001', '10001', '01110'],
+  D: ['11110', '10001', '10001', '10001', '10001', '10001', '11110'],
+  F: ['11111', '10000', '10000', '11110', '10000', '10000', '10000'],
+  T: ['11111', '00100', '00100', '00100', '00100', '00100', '00100'],
 };
 
 const FONT_W = 6; // 字符宽度（5 点 + 1 间距）
@@ -364,11 +436,6 @@ export function renderChartPng(curve: Array<CurvePoint>, width = 420, height = 1
   }
 
   // 折线：快速拉升画红、快速下杀画绿、平稳画灰，饱和度体现激烈程度
-  const minuteOf = (time: string) => {
-    const h = parseInt(time.slice(0, 2), 10);
-    const m = parseInt(time.slice(2, 4), 10);
-    return (isNaN(h) ? 0 : h) * 60 + (isNaN(m) ? 0 : m);
-  };
   for (let i = 0; i < N - 1; i++) {
     const diffPct = pcts[i + 1] - pcts[i];
     const minutes = minuteOf(curve[i + 1].time) - minuteOf(curve[i].time);
@@ -442,6 +509,25 @@ export function renderChartPng(curve: Array<CurvePoint>, width = 420, height = 1
     textColor
   );
   drawLabel(rgba, width, height, 4, clampY(Math.round(midY) - labelOffset), '0', textColor);
+
+  // 信号徽标：极速/快速 拉升/下杀（右上角）
+  const signal = getCurveSignal(curve);
+  if (signal) {
+    const badgeText = `${signal.level === 'extreme' ? 'SPIKE' : 'FAST'} ${
+      signal.direction === 'up' ? 'UP' : 'DOWN'
+    }`;
+    const badgeColor: [number, number, number] =
+      signal.direction === 'up' ? [255, 96, 96] : [70, 190, 96];
+    drawLabel(
+      rgba,
+      width,
+      height,
+      width - padding - badgeText.length * FONT_W - 6,
+      padding,
+      badgeText,
+      badgeColor
+    );
+  }
   return encodePng(width, height, rgba);
 }
 
@@ -517,6 +603,10 @@ export async function enrichStockTooltips(items: Array<LeekTreeItem>): Promise<v
         time: now,
         uri: record ? renderRecordsToUri([record]) : null,
       });
+      signalCache.set(code, {
+        time: now,
+        signal: record ? getCurveSignal(buildEqualWeightCurve([record])) : null,
+      });
     });
   }
   items.forEach((item) => {
@@ -530,8 +620,16 @@ export async function enrichStockTooltips(items: Array<LeekTreeItem>): Promise<v
     const current = item.tooltip;
     let base =
       current instanceof MarkdownString ? current.value : String(current || '');
-    // 移除旧的分时图，避免重复追加
-    base = base.replace(/\n+!\[分时图\]\(data:image\/png;base64,[^)]+\)/g, '').trim();
-    item.tooltip = new MarkdownString(`${base}\n\n![分时图](${cached.uri})`);
+    // 移除旧的信号文字与分时图，避免重复追加
+    base = base
+      .replace(/\n+(\*\*[^*]+\*\*)?\n+!\[分时图\]\(data:image\/png;base64,[^)]+\)/g, '')
+      .trim();
+    const signal = signalCache.get(item.info.code)?.signal || null;
+    const parts: Array<string> = [base];
+    if (signal) {
+      parts.push(`**${signalLabel(signal)}**`);
+    }
+    parts.push(`![分时图](${cached.uri})`);
+    item.tooltip = new MarkdownString(parts.join('\n\n'));
   });
 }

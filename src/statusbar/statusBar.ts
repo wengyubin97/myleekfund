@@ -6,7 +6,15 @@ import { DEFAULT_LABEL_FORMAT } from '../shared/constant';
 import { LeekFundConfig } from '../shared/leekConfig';
 import { LeekTreeItem } from '../shared/leekTreeItem';
 import { calcStockGroupAvgPercent, events, formatLabelString } from '../shared/utils';
-import { buildGroupChartDataUri, getStockChartDataUri, isMinuteSupported } from './groupChart';
+import {
+  buildGroupChartDataUri,
+  getGroupSignal,
+  getStockChartDataUri,
+  getStockSignal,
+  isMinuteSupported,
+  signalLabel,
+} from './groupChart';
+import type { TrendSignal } from './groupChart';
 
 function joinMarkdownLines(lines: Array<string>): string {
   return lines.join('  \n');
@@ -20,6 +28,7 @@ export class StatusBar {
   private statusBarGroupList: StatusBarItem[] = [];
   private statusBarGroupNames: string[] = [];
   private statusBarItemLabelFormat: string = '';
+  private barFlashTimers = new Map<StatusBarItem, NodeJS.Timeout>();
   constructor(stockService: StockService, fundService: FundService) {
     this.stockService = stockService;
     this.fundService = fundService;
@@ -142,8 +151,11 @@ export class StatusBar {
       let num = Math.abs(count);
       while (--num >= 0) {
         const bar = this.statusBarList.pop();
-        bar?.hide();
-        bar?.dispose();
+        if (bar) {
+          this.clearBarFlash(bar);
+          bar.hide();
+          bar.dispose();
+        }
       }
     }
     barStockList.forEach((stock, index) => {
@@ -198,8 +210,9 @@ export class StatusBar {
     mdLines.push(`成交额：${amount}`, `更新时间：${item.info?.time}`);
     stockBarItem.tooltip = new MarkdownString(joinMarkdownLines(mdLines));
     // 异步渲染当前分时图（data URI 内嵌，与分组图一致，含零轴/最高/最低标注）
-    this.updateStockChartTooltip(stockBarItem, code, mdLines);
-    stockBarItem.color = deLow ? this.riseColor : this.fallColor;
+    const baseColor = deLow ? this.riseColor : this.fallColor;
+    stockBarItem.color = baseColor;
+    this.updateStockChartTooltip(stockBarItem, code, mdLines, baseColor);
     stockBarItem.command = {
       title: 'Change stock',
       command: 'leek-fund.changeStatusBarItem',
@@ -213,18 +226,60 @@ export class StatusBar {
   async updateStockChartTooltip(
     stockBarItem: StatusBarItem,
     code: string,
-    baseLines: Array<string>
+    baseLines: Array<string>,
+    baseColor?: string
   ) {
     try {
       const dataUri = await getStockChartDataUri(code);
+      const signal = await getStockSignal(code);
+      this.setBarFlash(stockBarItem, signal, baseColor);
       if (!dataUri) {
         return;
       }
       const lines = baseLines.slice();
+      if (signal) {
+        lines.push('', `**${signalLabel(signal)}**`);
+      }
       lines.push('', '![分时图](' + dataUri + ')');
       stockBarItem.tooltip = new MarkdownString(joinMarkdownLines(lines));
     } catch (err) {
       console.error('update stock chart tooltip error:', err);
+    }
+  }
+
+  /** 出现快速/极速信号时让状态栏项闪烁（信号色与默认色交替） */
+  setBarFlash(barItem: StatusBarItem, signal: TrendSignal, baseColor?: string) {
+    const timer = this.barFlashTimers.get(barItem);
+    if (!signal) {
+      if (timer) {
+        clearInterval(timer);
+        this.barFlashTimers.delete(barItem);
+      }
+      if (baseColor !== undefined) {
+        barItem.color = baseColor;
+      }
+      return;
+    }
+    if (timer) {
+      return; // 已在闪烁
+    }
+    const signalColor = signal.direction === 'up' ? this.riseColor : this.fallColor;
+    let on = true;
+    barItem.color = signalColor;
+    this.barFlashTimers.set(
+      barItem,
+      setInterval(() => {
+        on = !on;
+        barItem.color = on ? signalColor : undefined;
+      }, 400)
+    );
+  }
+
+  clearBarFlash(barItem: StatusBarItem) {
+    const timer = this.barFlashTimers.get(barItem);
+    if (timer) {
+      clearInterval(timer);
+      this.barFlashTimers.delete(barItem);
     }
   }
 
@@ -290,6 +345,7 @@ export class StatusBar {
 
   disposeGroupBarItems() {
     this.statusBarGroupList.forEach((bar) => {
+      this.clearBarFlash(bar);
       bar.hide();
       bar.dispose();
     });
@@ -307,7 +363,8 @@ export class StatusBar {
     const avgText =
       group.avg === null ? '--' : `${group.avg >= 0 ? '+' : ''}${group.avg.toFixed(2)}%`;
     groupBarItem.text = [icon, group.name, avgText].filter((v) => v !== '').join(' ');
-    groupBarItem.color = group.avg === null ? undefined : group.avg >= 0 ? this.riseColor : this.fallColor;
+    const baseColor = group.avg === null ? undefined : group.avg >= 0 ? this.riseColor : this.fallColor;
+    groupBarItem.color = baseColor;
     groupBarItem.command = {
       title: 'Change stock group',
       command: 'leek-fund.changeStatusBarGroupItem',
@@ -335,7 +392,7 @@ export class StatusBar {
     const chartCodes = memberItems.map((item) => item.info.code);
     groupBarItem.tooltip = new MarkdownString(joinMarkdownLines(mdLines));
     // 等权合成分时图：异步生成并以内嵌 data URI 展示（避免本地图片链接被拦截）
-    this.updateGroupChartTooltip(groupBarItem, chartCodes, mdLines);
+    this.updateGroupChartTooltip(groupBarItem, chartCodes, mdLines, baseColor);
     groupBarItem.show();
     return groupBarItem;
   }
@@ -343,18 +400,25 @@ export class StatusBar {
   async updateGroupChartTooltip(
     groupBarItem: StatusBarItem,
     codes: Array<string>,
-    baseLines: Array<string>
+    baseLines: Array<string>,
+    baseColor?: string
   ) {
     try {
       const supportedCount = codes.filter(isMinuteSupported).length;
       if (!supportedCount) {
+        this.setBarFlash(groupBarItem, null, baseColor);
         return;
       }
       const dataUri = await buildGroupChartDataUri(codes);
+      const signal = await getGroupSignal(codes);
+      this.setBarFlash(groupBarItem, signal, baseColor);
       if (!dataUri) {
         return;
       }
       const lines = baseLines.slice();
+      if (signal) {
+        lines.push('', `**${signalLabel(signal)}**`);
+      }
       lines.push('');
       lines.push(`**等权分时（${supportedCount} 只）**`);
       lines.push(`![等权分时图](${dataUri})`);
