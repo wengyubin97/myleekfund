@@ -25,7 +25,7 @@ function stockTrend(code: string, name: string, stockCode: string) {
   }
 
   let mcid = market + '.' + code.substr(1);
-  let url = `${getEastMoneyHost()}/basic/full.html?mcid=${mcid}`;
+  let url = `${getEastMoneyHost()}/basic/full.html?mcid=${mcid}&leekGrayscale=1`;
 
   if (!!globalState.kLineChartSwitch) {
     if (
@@ -34,7 +34,7 @@ function stockTrend(code: string, name: string, stockCode: string) {
       stockCode.indexOf('sz399') !== 0
     ) {
       // 沪深股票详情地址可查看盘前盘后指数、买五卖五、筹码分布
-      url = `${getEastMoneyHost()}/basic/h5chart-iframe.html?code=${code.substr(1)}&market=${market}`;
+      url = `${getEastMoneyHost()}/basic/h5chart-iframe.html?code=${code.substr(1)}&market=${market}&leekGrayscale=1`;
     }
   }
 
@@ -61,7 +61,10 @@ function stockTrend(code: string, name: string, stockCode: string) {
     <title>股票走势</title>
     <style>
     html.vscode-dark, body.vscode-dark, html.vscode-high-contrast, body.vscode-high-contrast {
-      filter: invert(100%) hue-rotate(180deg);
+      filter: invert(100%) hue-rotate(180deg) grayscale(100%);
+    }
+    html, body {
+      filter: grayscale(100%);
     }
     </style>
   </head>
