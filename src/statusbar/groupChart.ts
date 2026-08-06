@@ -7,6 +7,11 @@ const MINUTE_QUERY = 'https://web.ifzq.gtimg.cn/appstock/app/minute/query?code='
 const CACHE_TTL = 30000; // 分钟数据缓存 30 秒
 const RENDER_TTL = 30000; // 渲染图缓存 30 秒
 const FETCH_CONCURRENCY = 6; // 分钟数据请求并发数
+const FAST_MOVE_THRESHOLD = 0.15; // %/分钟，低于此速度的线段画灰色
+const FULL_SAT_SPEED = 0.6; // %/分钟，达到该速度时颜色完全饱和
+const COLOR_GRAY: [number, number, number] = [150, 150, 150];
+const COLOR_UP: [number, number, number] = [240, 82, 82];
+const COLOR_DOWN: [number, number, number] = [64, 175, 84];
 
 export interface MinuteRecord {
   code: string;
@@ -333,7 +338,7 @@ export function renderChartPng(curve: Array<CurvePoint>, width = 420, height = 1
   const maxAbs = Math.max(...pcts.map((value) => Math.abs(value)), 0.5);
   const scale = chartH / 2 / maxAbs;
   const lastPct = pcts[pcts.length - 1];
-  const color: [number, number, number] = lastPct >= 0 ? [240, 82, 82] : [64, 175, 84];
+  const dotColor: [number, number, number] = lastPct >= 0 ? COLOR_UP : COLOR_DOWN;
 
   // 网格线 + 零轴
   const gridColor: [number, number, number] = [255, 255, 255];
@@ -354,12 +359,33 @@ export function renderChartPng(curve: Array<CurvePoint>, width = 420, height = 1
   const toY = (pct: number) => Math.round(midY - pct * scale);
 
   if (N === 1) {
-    drawDot(rgba, width, height, Math.round(toX(0)), toY(pcts[0]), color);
+    drawDot(rgba, width, height, Math.round(toX(0)), toY(pcts[0]), dotColor);
     return encodePng(width, height, rgba);
   }
 
-  // 折线
+  // 折线：快速拉升画红、快速下杀画绿、平稳画灰，饱和度体现激烈程度
+  const minuteOf = (time: string) => {
+    const h = parseInt(time.slice(0, 2), 10);
+    const m = parseInt(time.slice(2, 4), 10);
+    return (isNaN(h) ? 0 : h) * 60 + (isNaN(m) ? 0 : m);
+  };
   for (let i = 0; i < N - 1; i++) {
+    const diffPct = pcts[i + 1] - pcts[i];
+    const minutes = Math.max(1, minuteOf(curve[i + 1].time) - minuteOf(curve[i].time));
+    const speed = Math.abs(diffPct) / minutes;
+    let segmentColor: [number, number, number] = COLOR_GRAY;
+    if (speed >= FAST_MOVE_THRESHOLD) {
+      const intensity = Math.min(
+        1,
+        (speed - FAST_MOVE_THRESHOLD) / (FULL_SAT_SPEED - FAST_MOVE_THRESHOLD)
+      );
+      const base = diffPct > 0 ? COLOR_UP : COLOR_DOWN;
+      segmentColor = [
+        Math.round(COLOR_GRAY[0] + (base[0] - COLOR_GRAY[0]) * intensity),
+        Math.round(COLOR_GRAY[1] + (base[1] - COLOR_GRAY[1]) * intensity),
+        Math.round(COLOR_GRAY[2] + (base[2] - COLOR_GRAY[2]) * intensity),
+      ];
+    }
     drawLine(
       rgba,
       width,
@@ -368,12 +394,12 @@ export function renderChartPng(curve: Array<CurvePoint>, width = 420, height = 1
       toY(pcts[i]),
       Math.round(toX(i + 1)),
       toY(pcts[i + 1]),
-      color
+      segmentColor
     );
   }
 
   // 当前点
-  drawDot(rgba, width, height, Math.round(toX(N - 1)), toY(lastPct), color);
+  drawDot(rgba, width, height, Math.round(toX(N - 1)), toY(lastPct), dotColor);
 
   // 最大值 / 最小值 / 零轴标注
   const maxPct = Math.max(...pcts);
