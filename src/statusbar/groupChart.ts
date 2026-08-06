@@ -371,20 +371,25 @@ export function renderChartPng(curve: Array<CurvePoint>, width = 420, height = 1
   };
   for (let i = 0; i < N - 1; i++) {
     const diffPct = pcts[i + 1] - pcts[i];
-    const minutes = Math.max(1, minuteOf(curve[i + 1].time) - minuteOf(curve[i].time));
-    const speed = Math.abs(diffPct) / minutes;
+    const minutes = minuteOf(curve[i + 1].time) - minuteOf(curve[i].time);
     let segmentColor: [number, number, number] = COLOR_GRAY;
-    if (speed >= FAST_MOVE_THRESHOLD) {
-      const intensity = Math.min(
-        1,
-        (speed - FAST_MOVE_THRESHOLD) / (FULL_SAT_SPEED - FAST_MOVE_THRESHOLD)
-      );
-      const base = diffPct > 0 ? COLOR_UP : COLOR_DOWN;
-      segmentColor = [
-        Math.round(COLOR_GRAY[0] + (base[0] - COLOR_GRAY[0]) * intensity),
-        Math.round(COLOR_GRAY[1] + (base[1] - COLOR_GRAY[1]) * intensity),
-        Math.round(COLOR_GRAY[2] + (base[2] - COLOR_GRAY[2]) * intensity),
-      ];
+    // 时间缺口（如午休）无法衡量分钟级速度，画灰色；否则直接按相邻点变化判定
+    if (minutes <= 1) {
+      const speed = Math.abs(diffPct);
+      if (speed < FAST_MOVE_THRESHOLD) {
+        segmentColor = COLOR_GRAY;
+      } else {
+        const intensity = Math.min(
+          1,
+          (speed - FAST_MOVE_THRESHOLD) / (FULL_SAT_SPEED - FAST_MOVE_THRESHOLD)
+        );
+        const base = diffPct > 0 ? COLOR_UP : COLOR_DOWN;
+        segmentColor = [
+          Math.round(COLOR_GRAY[0] + (base[0] - COLOR_GRAY[0]) * intensity),
+          Math.round(COLOR_GRAY[1] + (base[1] - COLOR_GRAY[1]) * intensity),
+          Math.round(COLOR_GRAY[2] + (base[2] - COLOR_GRAY[2]) * intensity),
+        ];
+      }
     }
     drawLine(
       rgba,
