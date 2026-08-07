@@ -294,6 +294,20 @@ export function registerViewEvent(
     })
   );
   context.subscriptions.push(
+    commands.registerCommand('leek-fund.stockGroupUp', (target) => {
+      LeekFundConfig.moveStockGroupCfg(target.id, -1, () => {
+        stockProvider.refresh();
+      });
+    })
+  );
+  context.subscriptions.push(
+    commands.registerCommand('leek-fund.stockGroupDown', (target) => {
+      LeekFundConfig.moveStockGroupCfg(target.id, 1, () => {
+        stockProvider.refresh();
+      });
+    })
+  );
+  context.subscriptions.push(
     commands.registerCommand('leek-fund.addStockToGroup', (target) => {
       const code = LeekFundConfig.parseStockCode(target.id);
       if (!globalState.stockGroups.length) {

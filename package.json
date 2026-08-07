@@ -249,6 +249,14 @@
         "title": "删除股票分组"
       },
       {
+        "command": "leek-fund.stockGroupUp",
+        "title": "分组上移"
+      },
+      {
+        "command": "leek-fund.stockGroupDown",
+        "title": "分组下移"
+      },
+      {
         "command": "leek-fund.addStockToGroup",
         "title": "添加到分组"
       },
@@ -606,6 +614,16 @@
           "command": "leek-fund.removeStockGroup",
           "when": "view == leekFundView.stock && viewItem == stockGroup",
           "group": "group4"
+        },
+        {
+          "command": "leek-fund.stockGroupUp",
+          "when": "view == leekFundView.stock && viewItem == stockGroup",
+          "group": "group2"
+        },
+        {
+          "command": "leek-fund.stockGroupDown",
+          "when": "view == leekFundView.stock && viewItem == stockGroup",
+          "group": "group2"
         },
         {
           "command": "leek-fund.addStockGroupToBar",

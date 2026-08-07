@@ -261,6 +261,26 @@ export class LeekFundConfig extends BaseConfig {
     }
   }
 
+  static moveStockGroupCfg(groupId: string, offset: number, cb?: Function) {
+    const index: number = parseInt(groupId.replace('stockGroup_', ''));
+    const target = index + offset;
+    if (target < 0 || target >= globalState.stockGroups.length) {
+      return;
+    }
+    const name = globalState.stockGroups[index];
+    const stocks = globalState.stockGroupStocks[index];
+    globalState.stockGroups.splice(index, 1);
+    globalState.stockGroupStocks.splice(index, 1);
+    globalState.stockGroups.splice(target, 0, name);
+    globalState.stockGroupStocks.splice(target, 0, stocks);
+    this.setConfig('leek-fund.stockGroups', globalState.stockGroups);
+    this.setConfig('leek-fund.stockGroupStocks', globalState.stockGroupStocks);
+    window.showInformationMessage(`Stock Group Successfully moved.`);
+    if (cb && typeof cb === 'function') {
+      cb(groupId);
+    }
+  }
+
   static updateStockCfg(list: string, cb?: Function) {
     const cfgKey = 'leek-fund.stocks';
     const config = this.getGlobalConfig();
