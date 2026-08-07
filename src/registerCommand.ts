@@ -190,6 +190,7 @@ export function registerViewEvent(
   );
   context.subscriptions.push(
     commands.registerCommand('leek-fund.deleteStock', (target) => {
+      if (!target || !target.id) return;
       LeekFundConfig.removeStockCfg(target.id, () => {
         stockProvider.refresh();
       });
@@ -197,6 +198,7 @@ export function registerViewEvent(
   );
   context.subscriptions.push(
     commands.registerCommand('leek-fund.addStockToBar', (target) => {
+      if (!target || !target.id) return;
       LeekFundConfig.addStockToBarCfg(target.id, () => {
         stockProvider.refresh();
       });
@@ -272,6 +274,7 @@ export function registerViewEvent(
   );
   context.subscriptions.push(
     commands.registerCommand('leek-fund.renameStockGroup', (target) => {
+      if (!target || !target.id) return;
       const index: number = parseInt((target.id || '').replace('stockGroup_', ''));
       const currentName = globalState.stockGroups[index] || '';
       window
@@ -288,6 +291,7 @@ export function registerViewEvent(
   );
   context.subscriptions.push(
     commands.registerCommand('leek-fund.removeStockGroup', (target) => {
+      if (!target || !target.id) return;
       LeekFundConfig.removeStockGroupCfg(target.id, () => {
         stockProvider.refresh();
       });
@@ -295,6 +299,7 @@ export function registerViewEvent(
   );
   context.subscriptions.push(
     commands.registerCommand('leek-fund.stockGroupUp', (target) => {
+      if (!target || !target.id) return;
       LeekFundConfig.moveStockGroupCfg(target.id, -1, () => {
         stockProvider.refresh();
       });
@@ -302,6 +307,7 @@ export function registerViewEvent(
   );
   context.subscriptions.push(
     commands.registerCommand('leek-fund.stockGroupDown', (target) => {
+      if (!target || !target.id) return;
       LeekFundConfig.moveStockGroupCfg(target.id, 1, () => {
         stockProvider.refresh();
       });
@@ -309,6 +315,7 @@ export function registerViewEvent(
   );
   context.subscriptions.push(
     commands.registerCommand('leek-fund.addStockToGroup', (target) => {
+      if (!target || !target.id) return;
       const code = LeekFundConfig.parseStockCode(target.id);
       if (!globalState.stockGroups.length) {
         window.showInformationMessage('请先创建股票分组（点击股票视图标题栏的"添加分组"按钮）');
@@ -334,6 +341,7 @@ export function registerViewEvent(
   );
   context.subscriptions.push(
     commands.registerCommand('leek-fund.removeStockFromGroup', (target) => {
+      if (!target || !target.id) return;
       LeekFundConfig.removeStockFromGroupCfg(target.id, () => {
         stockProvider.refresh();
       });
@@ -360,6 +368,7 @@ export function registerViewEvent(
   );
   context.subscriptions.push(
     commands.registerCommand('leek-fund.addStockGroupToBar', (target) => {
+      if (!target || !target.id) return;
       const index: number = parseInt((target.id || '').replace('stockGroup_', ''));
       const name = globalState.stockGroups[index];
       if (!name) {
@@ -454,6 +463,7 @@ export function registerViewEvent(
   // 股票置顶
   context.subscriptions.push(
     commands.registerCommand('leek-fund.setStockTop', (target) => {
+      if (!target || !target.id) return;
       LeekFundConfig.setStockTopCfg(target.id, () => {
         fundProvider.refresh();
       });
@@ -462,6 +472,7 @@ export function registerViewEvent(
   // 股票上移
   context.subscriptions.push(
     commands.registerCommand('leek-fund.setStockUp', (target) => {
+      if (!target || !target.id) return;
       LeekFundConfig.setStockUpCfg(target.id, () => {
         fundProvider.refresh();
       });
@@ -470,6 +481,7 @@ export function registerViewEvent(
   // 股票下移
   context.subscriptions.push(
     commands.registerCommand('leek-fund.setStockDown', (target) => {
+      if (!target || !target.id) return;
       LeekFundConfig.setStockDownCfg(target.id, () => {
         fundProvider.refresh();
       });

@@ -537,37 +537,37 @@
         },
         {
           "command": "leek-fund.setStockTop",
-          "when": "view == leekFundView.stock && viewItem != category  && viewItem!=nodata",
+          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup  && viewItem!=nodata",
           "group": "group1"
         },
         {
           "command": "leek-fund.setStockUp",
-          "when": "view == leekFundView.stock && viewItem != category  && viewItem!=nodata",
+          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup  && viewItem!=nodata",
           "group": "group1"
         },
         {
           "command": "leek-fund.setStockDown",
-          "when": "view == leekFundView.stock && viewItem != category  && viewItem!=nodata",
+          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup  && viewItem!=nodata",
           "group": "group1"
         },
         {
           "command": "leek-fund.stockTrendPic",
-          "when": "view == leekFundView.stock  && viewItem != category && viewItem!=nodata",
+          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup && viewItem!=nodata",
           "group": "group2"
         },
         {
           "command": "leek-fund.setStockTop",
-          "when": "view == leekFundView.stock && viewItem != category && viewItem!=nodata",
+          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup && viewItem!=nodata",
           "group": "inline"
         },
         {
           "command": "leek-fund.setStockUp",
-          "when": "view == leekFundView.stock && viewItem != category && viewItem!=nodata",
+          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup && viewItem!=nodata",
           "group": "inline"
         },
         {
           "command": "leek-fund.setStockDown",
-          "when": "view == leekFundView.stock && viewItem != category && viewItem!=nodata",
+          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup && viewItem!=nodata",
           "group": "inline"
         },
         {
@@ -577,12 +577,12 @@
         },
         {
           "command": "leek-fund.deleteStock",
-          "when": "view == leekFundView.stock  && viewItem != category",
+          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup",
           "group": "group5"
         },
         {
           "command": "leek-fund.addStockToBar",
-          "when": "view == leekFundView.stock  && viewItem != category",
+          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup",
           "group": "group6"
         },
         {

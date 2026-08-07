@@ -276,6 +276,16 @@ function setGlobalVariable() {
   } else {
     globalState.fundLists = fundLists;
   }
+  // 自动清理非法股票代码（如误写入的 stockGroup_0），避免影响数据请求
+  const stockCodes = LeekFundConfig.getConfig('leek-fund.stocks') || [];
+  if (Array.isArray(stockCodes)) {
+    const validStockCodes = stockCodes.filter((code: string) =>
+      /^(sh|sz|bj|hk|usr_|nf_|hf_)/.test(String(code))
+    );
+    if (validStockCodes.length !== stockCodes.length) {
+      LeekFundConfig.setConfig('leek-fund.stocks', validStockCodes);
+    }
+  }
   // 临时解决3.10.1~3.10.3 pr产生的分组bug
   // const leekFundExt = extensions.getExtension('giscafer.leek-fund');
   // const currentVersion = leekFundExt?.packageJSON?.version;
