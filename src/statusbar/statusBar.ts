@@ -463,7 +463,7 @@ export class StatusBar {
       if (hit.limit === 'up') {
         text = `${hit.name} 涨停`;
       } else if (hit.speed5s >= SURGE_FAST_THRESHOLD) {
-        text = `${hit.name} 涨速${Number(hit.speed5s.toFixed(1))}%${this.gain1mText(hit.gain1m)}`;
+        text = `${hit.name} 涨速+${Number(hit.speed5s.toFixed(1))}%${this.gain1mText(hit.gain1m)}`;
       } else {
         text = `${hit.name}${this.gain1mText(hit.gain1m)}`;
       }
@@ -486,7 +486,7 @@ export class StatusBar {
       if (hit.limit === 'down') {
         text = `${hit.name} 跌停`;
       } else if (hit.speed5s <= -SURGE_FAST_THRESHOLD) {
-        text = `${hit.name} 跌速${Number(Math.abs(hit.speed5s).toFixed(1))}%${this.gain1mText(hit.gain1m)}`;
+        text = `${hit.name} ${Number(hit.speed5s.toFixed(1))}%${this.gain1mText(hit.gain1m)}`;
       } else {
         text = `${hit.name}${this.gain1mText(hit.gain1m)}`;
       }
@@ -504,12 +504,12 @@ export class StatusBar {
     }
   }
 
-  /** 1min 涨跌幅文本（无数据返回空串） */
+  /** 1min 涨跌幅文本（带符号，无数据返回空串） */
   private gain1mText(gain1m: number | null): string {
     if (gain1m === null || isNaN(gain1m)) {
       return '';
     }
-    return ` 1min${gain1m >= 0 ? '+' : ''}${Number(gain1m.toFixed(1))}%`;
+    return ` ${gain1m >= 0 ? '+' : ''}${Number(gain1m.toFixed(1))}%`;
   }
 
   /** A股涨跌停判定（主板 10%、创业/科创 20%、北交所 30%、ST 5%）；港股/美股/期货无涨跌停 */
