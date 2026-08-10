@@ -2,10 +2,9 @@ import { MarkdownString, StatusBarAlignment, StatusBarItem, window } from 'vscod
 import FundService from '../explorer/fundService';
 import StockService from '../explorer/stockService';
 import globalState from '../globalState';
-import { DEFAULT_LABEL_FORMAT } from '../shared/constant';
 import { LeekFundConfig } from '../shared/leekConfig';
 import { LeekTreeItem } from '../shared/leekTreeItem';
-import { calcStockGroupAvgPercent, events, formatLabelString } from '../shared/utils';
+import { calcStockGroupAvgPercent, events } from '../shared/utils';
 import {
   buildGroupChartDataUri,
   getGroupSignal,
@@ -42,7 +41,6 @@ export class StatusBar {
   private surgeBarItem: StatusBarItem;
   /** 上次轮询价缓存（用于 5 秒轮询涨速判定） */
   private surgePriceCache: Map<string, { price: number; time: number }> = new Map();
-  private statusBarItemLabelFormat: string = '';
   constructor(stockService: StockService, fundService: FundService) {
     this.stockService = stockService;
     this.fundService = fundService;
@@ -157,10 +155,6 @@ export class StatusBar {
       );
     });
 
-    this.statusBarItemLabelFormat =
-      globalState.labelFormat?.['statusBarLabelFormat'] ??
-      DEFAULT_LABEL_FORMAT.statusBarLabelFormat;
-
     if (!barStockList.length) {
       barStockList.push(sz || this.stockService.stockList[0]);
     }
@@ -203,13 +197,10 @@ export class StatusBar {
       heldPrice,
     } = item.info;
     const deLow = percent.indexOf('-') === -1;
-    // Respect hideStatusBarIcon config
-    const icon = this.hideStatusBarIcon ? '' : (deLow ? '📈' : '📉');
-    stockBarItem.text = formatLabelString(this.statusBarItemLabelFormat, {
-      ...item.info,
-      percent: `${percent}%`,
-      icon,
-    });
+    // 紧凑格式：名称 价格 涨跌幅（去掉图标与括号）
+    const priceText = item.info.price || '--';
+    const percentText = item.info.percent ? `${item.info.percent}%` : '--';
+    stockBarItem.text = `${item.info?.name ?? code} ${priceText} ${percentText}`;
     let heldText = '';
     if (heldAmount && heldPrice) {
       heldText = `成本：${heldPrice}   持仓：${heldAmount}\n`;
