@@ -12,6 +12,7 @@ const FULL_SAT_SPEED = 0.6; // %/分钟，达到该速度时颜色完全饱和
 const COLOR_GRAY: [number, number, number] = [150, 150, 150];
 const COLOR_UP: [number, number, number] = [240, 82, 82];
 const COLOR_DOWN: [number, number, number] = [64, 175, 84];
+const COLOR_AVG: [number, number, number] = [240, 200, 40]; // 均价线（黄）
 
 export type TrendSignal = {
   level: 'extreme' | 'fast';
@@ -80,7 +81,14 @@ export const getGroupSignal = (codes: Array<string>): Promise<TrendSignal> =>
 export interface MinuteRecord {
   code: string;
   prevClose: number;
-  points: Array<{ time: string; price: number }>;
+  points: Array<MinutePoint>;
+}
+
+export interface MinutePoint {
+  time: string;
+  price: number;
+  volume?: number;
+  amount?: number;
 }
 
 export interface CurvePoint {
@@ -94,13 +102,18 @@ export function parseMinuteResponse(code: string, body: any): MinuteRecord | nul
   const list: Array<string> = stock?.data?.data || [];
   const qtArr: Array<any> = stock?.qt?.[code] || [];
   const prevClose = parseFloat(qtArr[4]);
-  const points: Array<{ time: string; price: number }> = [];
+  const points: Array<MinutePoint> = [];
   list.forEach((line) => {
     const parts = String(line).split(/\s+/);
     if (parts.length >= 2) {
       const price = parseFloat(parts[1]);
       if (!isNaN(price)) {
-        points.push({ time: parts[0], price });
+        points.push({
+          time: parts[0],
+          price,
+          volume: parseFloat(parts[2]) || undefined,
+          amount: parseFloat(parts[3]) || undefined,
+        });
       }
     }
   });
@@ -181,6 +194,55 @@ export function buildEqualWeightCurve(records: Array<MinuteRecord>): Array<Curve
       const arr = timeMap.get(point.time) || [];
       arr.push(pct);
       timeMap.set(point.time, arr);
+    });
+  });
+  const times = Array.from(timeMap.keys()).sort();
+  return times.map((time) => {
+    const arr = timeMap.get(time) || [];
+    const avg = arr.reduce((sum, value) => sum + value, 0) / arr.length;
+    return { time, pct: avg };
+  });
+}
+
+/** 计算等权均价线：各成分股先算累计均价（VWAP）涨跌幅，再按分钟等权平均 */
+export function buildEqualWeightAvgPriceCurve(records: Array<MinuteRecord>): Array<CurvePoint> {
+  if (!records.length) {
+    return [];
+  }
+  const timeMap = new Map<string, Array<number>>();
+  records.forEach((record) => {
+    // 仅支持含成交额数据的品种（A股/港股）；指数等价格与成交额口径不一致时跳过
+    const lastPoint = record.points[record.points.length - 1];
+    if (
+      !lastPoint ||
+      lastPoint.price <= 0 ||
+      lastPoint.volume == null ||
+      lastPoint.amount == null ||
+      lastPoint.volume <= 0 ||
+      lastPoint.amount <= 0
+    ) {
+      return;
+    }
+    // 腾讯分钟数据的成交额/成交量是累计值：均价 = 累计成交额 / 累计成交量
+    // 自动识别成交量单位：A股为“手”（1手=100股），均价需再除以 100
+    const rawVwap = lastPoint.amount / lastPoint.volume;
+    const lotFactor =
+      Math.abs(rawVwap / lastPoint.price - 1) <= 0.3
+        ? 1
+        : Math.abs(rawVwap / 100 / lastPoint.price - 1) <= 0.3
+        ? 100
+        : 0;
+    if (lotFactor === 0) {
+      return;
+    }
+    record.points.forEach((point) => {
+      if (point.volume && point.amount && record.prevClose > 0) {
+        const avgPrice = point.amount / point.volume / lotFactor;
+        const pct = (avgPrice / record.prevClose - 1) * 100;
+        const arr = timeMap.get(point.time) || [];
+        arr.push(pct);
+        timeMap.set(point.time, arr);
+      }
     });
   });
   const times = Array.from(timeMap.keys()).sort();
@@ -287,16 +349,20 @@ function drawLine(
   y0: number,
   x1: number,
   y1: number,
-  color: [number, number, number]
+  color: [number, number, number],
+  thickness = 3
 ) {
   const steps = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+  const half = Math.floor(thickness / 2);
+  const low = -half;
+  const high = thickness - half - 1;
   for (let i = 0; i <= steps; i++) {
     const t = steps === 0 ? 0 : i / steps;
     const x = Math.round(x0 + (x1 - x0) * t);
     const y = Math.round(y0 + (y1 - y0) * t);
-    setPixel(rgba, width, height, x, y, color, 255);
-    setPixel(rgba, width, height, x, y + 1, color, 255);
-    setPixel(rgba, width, height, x, y - 1, color, 255);
+    for (let d = low; d <= high; d++) {
+      setPixel(rgba, width, height, x, y + d, color, 255);
+    }
   }
 }
 
@@ -395,7 +461,12 @@ function drawLabel(
 }
 
 /** 渲染等权分时曲线为 PNG（透明背景） */
-export function renderChartPng(curve: Array<CurvePoint>, width = 420, height = 170): Buffer {
+export function renderChartPng(
+  curve: Array<CurvePoint>,
+  width = 420,
+  height = 170,
+  avgCurve?: Array<CurvePoint>
+): Buffer {
   const rgba = Buffer.alloc(width * height * 4);
   if (!curve.length) {
     return encodePng(width, height, rgba);
@@ -407,7 +478,12 @@ export function renderChartPng(curve: Array<CurvePoint>, width = 420, height = 1
   const chartH = height - padding * 2;
   const midY = padding + chartH / 2;
   const pcts = curve.map((point) => point.pct);
-  const maxAbs = Math.max(...pcts.map((value) => Math.abs(value)), 0.5);
+  const avgPcts = avgCurve ? avgCurve.map((point) => point.pct) : [];
+  const maxAbs = Math.max(
+    ...pcts.map((value) => Math.abs(value)),
+    ...avgPcts.map((value) => Math.abs(value)),
+    0.5
+  );
   const scale = chartH / 2 / maxAbs;
   const lastPct = pcts[pcts.length - 1];
   const dotColor: [number, number, number] = lastPct >= 0 ? COLOR_UP : COLOR_DOWN;
@@ -427,12 +503,30 @@ export function renderChartPng(curve: Array<CurvePoint>, width = 420, height = 1
   }
 
   const N = curve.length;
-  const toX = (index: number) => leftPad + (index / Math.max(N - 1, 1)) * chartW;
+  const toX = (index: number, count = N) =>
+    leftPad + (index / Math.max(count - 1, 1)) * chartW;
   const toY = (pct: number) => Math.round(midY - pct * scale);
 
   if (N === 1) {
     drawDot(rgba, width, height, Math.round(toX(0)), toY(pcts[0]), dotColor);
     return encodePng(width, height, rgba);
+  }
+
+  // 均价线（黄，绘制在价格曲线下方）
+  if (avgCurve && avgCurve.length >= 2) {
+    for (let i = 0; i < avgCurve.length - 1; i++) {
+      drawLine(
+        rgba,
+        width,
+        height,
+        Math.round(toX(i, avgCurve.length)),
+        toY(avgCurve[i].pct),
+        Math.round(toX(i + 1, avgCurve.length)),
+        toY(avgCurve[i + 1].pct),
+        COLOR_AVG,
+        2
+      );
+    }
   }
 
   // 折线：快速拉升画红、快速下杀画绿、平稳画灰，饱和度体现激烈程度
@@ -510,8 +604,19 @@ export function renderChartPng(curve: Array<CurvePoint>, width = 420, height = 1
   );
   drawLabel(rgba, width, height, 4, clampY(Math.round(midY) - labelOffset), '0', textColor);
 
-  // 信号徽标：极速/快速 拉升/下杀（右上角）
+  // 均价线图例 + 信号徽标（右上角）
   const signal = getCurveSignal(curve);
+  const legendText = 'AVG';
+  const legendColor: [number, number, number] = COLOR_AVG;
+  drawLabel(
+    rgba,
+    width,
+    height,
+    width - padding - legendText.length * FONT_W - 6,
+    padding,
+    legendText,
+    legendColor
+  );
   if (signal) {
     const badgeText = `${signal.level === 'extreme' ? 'SPIKE' : 'FAST'} ${
       signal.direction === 'up' ? 'UP' : 'DOWN'
@@ -523,7 +628,7 @@ export function renderChartPng(curve: Array<CurvePoint>, width = 420, height = 1
       width,
       height,
       width - padding - badgeText.length * FONT_W - 6,
-      padding,
+      padding + 20,
       badgeText,
       badgeColor
     );
@@ -552,7 +657,8 @@ export function renderRecordsToUri(records: Array<MinuteRecord>): string | null 
   if (curve.length < 2) {
     return null;
   }
-  const png = renderChartPng(curve);
+  const avgCurve = buildEqualWeightAvgPriceCurve(records);
+  const png = renderChartPng(curve, 420, 170, avgCurve);
   return `data:image/png;base64,${png.toString('base64')}`;
 }
 
