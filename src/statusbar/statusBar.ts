@@ -20,6 +20,12 @@ function joinMarkdownLines(lines: Array<string>): string {
   return lines.join('  \n');
 }
 
+/** 信号色：快速拉升=大红，快速下降=大绿 */
+const SIGNAL_UP_RED = '#E53935';
+const SIGNAL_DOWN_GREEN = '#00B050';
+/** 闪烁间隙/无数据时的灰色 */
+const BAR_GRAY = '#A0A0A0';
+
 export class StatusBar {
   private stockService: StockService;
   private fundService: FundService;
@@ -28,7 +34,6 @@ export class StatusBar {
   private statusBarGroupList: StatusBarItem[] = [];
   private statusBarGroupNames: string[] = [];
   private statusBarItemLabelFormat: string = '';
-  private barFlashTimers = new Map<StatusBarItem, NodeJS.Timeout>();
   constructor(stockService: StockService, fundService: FundService) {
     this.stockService = stockService;
     this.fundService = fundService;
@@ -119,23 +124,28 @@ export class StatusBar {
     }
 
     let sz: LeekTreeItem | null = null;
-    const statusBarStocks = LeekFundConfig.getConfig('leek-fund.statusBarStock');
-    const barStockList: Array<LeekTreeItem> = new Array(statusBarStocks.length);
-
-    this.statusBarItemLabelFormat =
-      globalState.labelFormat?.['statusBarLabelFormat'] ??
-      DEFAULT_LABEL_FORMAT.statusBarLabelFormat;
-
-    this.stockService.stockList.forEach((stockItem) => {
+    const statusBarStocks: string[] = LeekFundConfig.getConfig('leek-fund.statusBarStock');
+    // 用 filter 生成紧凑数组（避免稀疏数组空洞导致状态栏条不更新）
+    const barStockList: Array<LeekTreeItem> = this.stockService.stockList.filter((stockItem) => {
       const { code } = stockItem.info;
       if (code === 'sh000001') {
         sz = stockItem;
       }
-      if (statusBarStocks.includes(code)) {
-        // barStockList.push(stockItem);
-        barStockList[statusBarStocks.indexOf(code)] = stockItem;
-      }
+      return statusBarStocks.includes(code);
     });
+    // 个股按涨跌幅降序排列（涨幅高的靠左）
+    barStockList.sort((a, b) => {
+      const pa = parseFloat(a.info.percent);
+      const pb = parseFloat(b.info.percent);
+      return (
+        (isNaN(pb) ? Number.NEGATIVE_INFINITY : pb) -
+        (isNaN(pa) ? Number.NEGATIVE_INFINITY : pa)
+      );
+    });
+
+    this.statusBarItemLabelFormat =
+      globalState.labelFormat?.['statusBarLabelFormat'] ??
+      DEFAULT_LABEL_FORMAT.statusBarLabelFormat;
 
     if (!barStockList.length) {
       barStockList.push(sz || this.stockService.stockList[0]);
@@ -152,7 +162,6 @@ export class StatusBar {
       while (--num >= 0) {
         const bar = this.statusBarList.pop();
         if (bar) {
-          this.clearBarFlash(bar);
           bar.hide();
           bar.dispose();
         }
@@ -247,40 +256,15 @@ export class StatusBar {
     }
   }
 
-  /** 出现快速/极速信号时让状态栏项闪烁（信号色与默认色交替） */
+  /** 快速拉升=大红、快速下杀=大绿，无信号=底色（静态显示，不闪烁） */
   setBarFlash(barItem: StatusBarItem, signal: TrendSignal, baseColor?: string) {
-    const timer = this.barFlashTimers.get(barItem);
     if (!signal) {
-      if (timer) {
-        clearInterval(timer);
-        this.barFlashTimers.delete(barItem);
-      }
       if (baseColor !== undefined) {
         barItem.color = baseColor;
       }
       return;
     }
-    if (timer) {
-      return; // 已在闪烁
-    }
-    const signalColor = signal.direction === 'up' ? this.riseColor : this.fallColor;
-    let on = true;
-    barItem.color = signalColor;
-    this.barFlashTimers.set(
-      barItem,
-      setInterval(() => {
-        on = !on;
-        barItem.color = on ? signalColor : undefined;
-      }, 400)
-    );
-  }
-
-  clearBarFlash(barItem: StatusBarItem) {
-    const timer = this.barFlashTimers.get(barItem);
-    if (timer) {
-      clearInterval(timer);
-      this.barFlashTimers.delete(barItem);
-    }
+    barItem.color = signal.direction === 'up' ? SIGNAL_UP_RED : SIGNAL_DOWN_GREEN;
   }
 
   refreshStockGroupStatusBar() {
@@ -345,7 +329,6 @@ export class StatusBar {
 
   disposeGroupBarItems() {
     this.statusBarGroupList.forEach((bar) => {
-      this.clearBarFlash(bar);
       bar.hide();
       bar.dispose();
     });
