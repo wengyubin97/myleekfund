@@ -271,6 +271,28 @@ export function buildVolumeMap(records: Array<MinuteRecord>): Map<string, number
   return map;
 }
 
+/** 最新一根分时量对比上一根及前几根均值（MA5/MA10，不含当前）；数据不足两根时返回 null */
+export function getLatestVolumeCompare(
+  records: Array<MinuteRecord>
+): { cur: number; prev: number; ma5: number | null; ma10: number | null } | null {
+  const map = buildVolumeMap(records);
+  const times = Array.from(map.keys()).sort();
+  if (times.length < 2) {
+    return null;
+  }
+  const cur = map.get(times[times.length - 1]) || 0;
+  const prev = map.get(times[times.length - 2]) || 0;
+  if (prev <= 0) {
+    return null;
+  }
+  const prevVols = times.slice(0, -1).map((t) => map.get(t) || 0); // 不含当前
+  const avgOf = (n: number): number | null => {
+    const slice = prevVols.slice(-n);
+    return slice.length < n ? null : slice.reduce((s, v) => s + v, 0) / n;
+  };
+  return { cur, prev, ma5: avgOf(5), ma10: avgOf(10) };
+}
+
 /* ---------- 最小 PNG 编码器（RGBA，zlib 压缩） ---------- */
 
 const CRC_TABLE = (() => {

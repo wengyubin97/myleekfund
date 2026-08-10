@@ -9,6 +9,8 @@ import { calcStockGroupAvgPercent, events, formatLabelString } from '../shared/u
 import {
   buildGroupChartDataUri,
   getGroupSignal,
+  getLatestVolumeCompare,
+  getMinuteRecords,
   getStockChartDataUri,
   getStockSignal,
   isMinuteSupported,
@@ -242,14 +244,39 @@ export class StatusBar {
       const dataUri = await getStockChartDataUri(code);
       const signal = await getStockSignal(code);
       this.setBarFlash(stockBarItem, signal, baseColor);
-      if (!dataUri) {
-        return;
-      }
+      const records = await getMinuteRecords([code]);
+      const volCmp = getLatestVolumeCompare(records);
       const lines = baseLines.slice();
+      // 分时量对比（当前 / 上一根 + MA5 + MA10），插到「更新时间」上方
+      if (volCmp) {
+        const pctOf = (base: number) => Math.round(Math.abs(volCmp.cur / base - 1) * 100);
+        const tagOf = (base: number) => (volCmp.cur >= base ? '放量' : '缩量');
+        const volLines: Array<string> = [
+          `分时量：当前 ${volCmp.cur} / 上一根 ${volCmp.prev}（${tagOf(volCmp.prev)} ${pctOf(volCmp.prev)}%）`,
+        ];
+        const maParts: Array<string> = [];
+        if (volCmp.ma5 !== null) {
+          maParts.push(`MA5 ${tagOf(volCmp.ma5)} ${pctOf(volCmp.ma5)}%`);
+        }
+        if (volCmp.ma10 !== null) {
+          maParts.push(`MA10 ${tagOf(volCmp.ma10)} ${pctOf(volCmp.ma10)}%`);
+        }
+        if (maParts.length) {
+          volLines.push(`量能均线：${maParts.join(' · ')}`);
+        }
+        const idx = lines.findIndex((l) => l.startsWith('更新时间'));
+        if (idx >= 0) {
+          lines.splice(idx, 0, ...volLines);
+        } else {
+          lines.push(...volLines);
+        }
+      }
       if (signal) {
         lines.push('', `**${signalLabel(signal)}**`);
       }
-      lines.push('', '![分时图](' + dataUri + ')');
+      if (dataUri) {
+        lines.push('', '![分时图](' + dataUri + ')');
+      }
       stockBarItem.tooltip = new MarkdownString(joinMarkdownLines(lines));
     } catch (err) {
       console.error('update stock chart tooltip error:', err);
