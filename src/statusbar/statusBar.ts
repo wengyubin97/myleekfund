@@ -26,9 +26,8 @@ const SIGNAL_UP_RED = '#E53935';
 const SIGNAL_DOWN_GREEN = '#00B050';
 /** 闪烁间隙/无数据时的灰色 */
 const BAR_GRAY = '#A0A0A0';
-/** 轮询涨速阈值（归一化 %/分钟）：5 秒轮询约 0.04%/5s，极速 1.5%/分钟约 0.13%/5s */
+/** 快速涨跌提示阈值（%/分钟）：5 秒轮询约 0.04%/5s */
 const SURGE_FAST_THRESHOLD = 0.5;
-const SURGE_EXTREME_THRESHOLD = 1.5;
 
 export class StatusBar {
   private stockService: StockService;
@@ -37,9 +36,10 @@ export class StatusBar {
   private statusBarList: StatusBarItem[] = [];
   private statusBarGroupList: StatusBarItem[] = [];
   private statusBarGroupNames: string[] = [];
-  /** 分组快速上涨提示条：状态栏最左第一位置（轮动），无信号时隐藏 */
-  private surgeBarItem: StatusBarItem;
-  /** 上次轮询价缓存（用于 5 秒轮询涨速判定） */
+  /** 快速涨跌提示条：状态栏最左第一位置（轮动），无信号时隐藏 */
+  private surgeUpBarItem: StatusBarItem;
+  private surgeDownBarItem: StatusBarItem;
+  /** 上次轮询价缓存（用于 5 秒轮询涨跌速判定） */
   private surgePriceCache: Map<string, { price: number; time: number }> = new Map();
   constructor(stockService: StockService, fundService: FundService) {
     this.stockService = stockService;
@@ -47,8 +47,10 @@ export class StatusBar {
     this.statusBarList = [];
     this.fundBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 3);
     // priority 高于普通分组（100-index）与个股（3），确保占据最左位置
-    this.surgeBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 200);
-    this.surgeBarItem.hide();
+    this.surgeUpBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 210);
+    this.surgeDownBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 200);
+    this.surgeUpBarItem.hide();
+    this.surgeDownBarItem.hide();
     this.refreshStockStatusBar();
     this.bindEvents();
     /* events.on('updateConfig:leek-fund.statusBarStock',()=>{
@@ -366,146 +368,110 @@ export class StatusBar {
     this.statusBarGroupNames = [];
   }
 
-  /** 格式化涨幅（去掉多余小数，正数带 +） */
-  private formatPct(value: number | null): string {
-    if (value === null || isNaN(value)) {
-      return '--';
-    }
-    const rounded = Number(value.toFixed(1));
-    return `${value >= 0 ? '+' : ''}${rounded}%`;
-  }
-
   /**
-   * 分组快速上涨提示：状态栏最左第一位置（轮动）。
-   * 涨速基于行情轮询（默认 5 秒）相邻两次价格差，归一化为 %/分钟；
-   * 叠加当前分钟放量（分钟线，30 秒缓存）判定。多个候选取涨速最大的；
-   * 无信号时隐藏，让普通分组/个股保持原有顺序。
+   * 快速涨跌提示：状态栏最左（轮动），涨速条与跌速条各占一位。
+   * 从全部自选股中，按 5 秒轮询价差归一化涨跌速（%/分钟），
+   * 分别取涨速最快与跌速最快的个股显示；无信号时隐藏。
    */
   async refreshSurgeStatusBar() {
     if (this.hideStatusBar || this.hideStatusBarStock) {
-      this.surgeBarItem.hide();
+      this.surgeUpBarItem.hide();
+      this.surgeDownBarItem.hide();
       return;
     }
 
     const now = Date.now();
-    const groupNames: Array<string> =
-      LeekFundConfig.getConfig('leek-fund.statusBarStockGroups') || [];
-    const candidates: Array<{
-      group: string;
-      avg: number | null;
-      code: string;
-      name: string;
-      percent: string;
-      speed: number;
-      volPct: number;
-    }> = [];
-    const liveCodes: Array<string> = [];
+    const hits: Array<{ code: string; name: string; speed: number }> = [];
 
     await Promise.all(
-      groupNames.map(async (name) => {
-        const index = globalState.stockGroups.indexOf(name);
-        if (index === -1) {
+      this.stockService.stockList.map(async (item) => {
+        const code = item.info.code;
+        const curPrice = parseFloat(item.info.price || '');
+        if (isNaN(curPrice) || curPrice <= 0) {
           return;
         }
-        const codes: Array<string> = globalState.stockGroupStocks[index] || [];
-        const avg = calcStockGroupAvgPercent(this.stockService.stockList, codes);
-        liveCodes.push(...codes);
-        await Promise.all(
-          codes.map(async (code) => {
-            const item = this.stockService.stockList.find((stock) => stock.info.code === code);
-            if (!item) {
-              return;
-            }
-            // 涨速：相邻两次轮询价差，归一化到 %/分钟
-            const curPrice = parseFloat(item.info.price || '');
-            if (isNaN(curPrice) || curPrice <= 0) {
-              return;
-            }
-            const last = this.surgePriceCache.get(code);
-            this.surgePriceCache.set(code, { price: curPrice, time: now });
-            if (!last) {
-              return; // 首次见到，只有一次采样，跳过
-            }
-            const elapsedSec = (now - last.time) / 1000;
-            // 间隔不合理（闭市轮询拉长/长时间暂停）不判定
-            if (elapsedSec < 1 || elapsedSec > 60) {
-              return;
-            }
-            const diffPct = (curPrice / last.price - 1) * 100;
-            const speed = diffPct * (60 / elapsedSec);
-            if (speed < SURGE_FAST_THRESHOLD) {
-              return;
-            }
-            // 放量判定：当前分钟量 > 上一根（分钟线 30 秒缓存）
-            const records = await getMinuteRecords([code]);
-            const volCmp = getLatestVolumeCompare(records);
-            if (!volCmp || volCmp.cur <= volCmp.prev) {
-              return;
-            }
-            candidates.push({
-              group: name,
-              avg,
-              code,
-              name: item.info.name,
-              percent: item.info.percent,
-              speed,
-              volPct: Math.round((volCmp.cur / volCmp.prev - 1) * 100),
-            });
-          })
-        );
+        const last = this.surgePriceCache.get(code);
+        this.surgePriceCache.set(code, { price: curPrice, time: now });
+        if (!last) {
+          return; // 首次见到，只有一次采样，跳过
+        }
+        const elapsedSec = (now - last.time) / 1000;
+        // 间隔不合理（闭市轮询拉长/长时间暂停）不判定
+        if (elapsedSec < 1 || elapsedSec > 60) {
+          return;
+        }
+        const diffPct = (curPrice / last.price - 1) * 100;
+        const speed = diffPct * (60 / elapsedSec);
+        if (Math.abs(speed) < SURGE_FAST_THRESHOLD) {
+          return;
+        }
+        hits.push({ code, name: item.info.name || code, speed });
       })
     );
 
-    // 清理不再属于当前分组的缓存
+    // 清理不再属于自选股的缓存
+    const liveCodes = this.stockService.stockList.map((item) => item.info.code);
     this.surgePriceCache.forEach((_, code) => {
       if (!liveCodes.includes(code)) {
         this.surgePriceCache.delete(code);
       }
     });
 
-    if (!candidates.length) {
-      this.surgeBarItem.hide();
-      return;
+    const upHits = hits.filter((hit) => hit.speed > 0).sort((a, b) => b.speed - a.speed);
+    const downHits = hits.filter((hit) => hit.speed < 0).sort((a, b) => a.speed - b.speed);
+    const upHit = upHits.length ? upHits[0] : null;
+    const downHit = downHits.length ? downHits[0] : null;
+
+    if (upHit) {
+      this.surgeUpBarItem.text = `${upHit.name} 涨速${Number(upHit.speed.toFixed(1))}%`;
+      this.surgeUpBarItem.color = SIGNAL_UP_RED;
+      this.surgeUpBarItem.command = {
+        title: 'Change stock',
+        command: 'leek-fund.changeStatusBarItem',
+        arguments: [this.findStockId(upHit.code)],
+      };
+      this.updateSurgeTooltip(this.surgeUpBarItem, upHit, '涨');
+      this.surgeUpBarItem.show();
+    } else {
+      this.surgeUpBarItem.hide();
     }
 
-    candidates.sort((a, b) => b.speed - a.speed);
-    const hit = candidates[0];
-    const percentText = parseFloat(hit.percent);
-    const stockPct = isNaN(percentText) ? '--' : this.formatPct(percentText);
-    this.surgeBarItem.text = `${hit.group} ${this.formatPct(hit.avg)} ${hit.name} ${stockPct} 涨速${Number(
-      hit.speed.toFixed(1)
-    )}% 分时放量${hit.volPct}%`;
-    this.surgeBarItem.color = SIGNAL_UP_RED;
-    this.surgeBarItem.command = {
-      title: 'Change stock group',
-      command: 'leek-fund.changeStatusBarGroupItem',
-      arguments: [hit.group],
-    };
-    // tooltip：该股分时图（纯 markdown，不依赖 HTML 渲染）
-    this.updateSurgeTooltip(hit);
-    this.surgeBarItem.show();
+    if (downHit) {
+      this.surgeDownBarItem.text = `${downHit.name} 跌速${Number(Math.abs(downHit.speed).toFixed(1))}%`;
+      this.surgeDownBarItem.color = SIGNAL_DOWN_GREEN;
+      this.surgeDownBarItem.command = {
+        title: 'Change stock',
+        command: 'leek-fund.changeStatusBarItem',
+        arguments: [this.findStockId(downHit.code)],
+      };
+      this.updateSurgeTooltip(this.surgeDownBarItem, downHit, '跌');
+      this.surgeDownBarItem.show();
+    } else {
+      this.surgeDownBarItem.hide();
+    }
   }
 
-  async updateSurgeTooltip(hit: {
-    group: string;
-    avg: number | null;
-    code: string;
-    name: string;
-    percent: string;
-    speed: number;
-    volPct: number;
-  }) {
+  /** 按代码查找自选股条目 id（用于切换状态栏展示） */
+  private findStockId(code: string): string {
+    const item = this.stockService.stockList.find((stock) => stock.info.code === code);
+    return item?.id || code;
+  }
+
+  async updateSurgeTooltip(
+    barItem: StatusBarItem,
+    hit: { code: string; name: string; speed: number },
+    direction: '涨' | '跌'
+  ) {
     try {
       const dataUri = await getStockChartDataUri(hit.code);
       const lines: Array<string> = [
-        `【分组快速拉升】${hit.group} 平均 ${this.formatPct(hit.avg)}`,
-        `${hit.name}（${hit.code}） ${this.formatPct(parseFloat(hit.percent))}`,
-        `涨速 ${hit.speed.toFixed(2)}%/分钟  当前分钟放量 ${hit.volPct}%`,
+        `${hit.name}（${hit.code}）`,
+        `${direction}速 ${Math.abs(hit.speed).toFixed(2)}%/分钟`,
       ];
       if (dataUri) {
         lines.push('', `![分时图](${dataUri})`);
       }
-      this.surgeBarItem.tooltip = new MarkdownString(joinMarkdownLines(lines));
+      barItem.tooltip = new MarkdownString(joinMarkdownLines(lines));
     } catch (err) {
       console.error('update surge tooltip error:', err);
     }
