@@ -4,7 +4,7 @@
  *  Github: https://github.com/giscafer
  *-------------------------------------------------------------*/
 
-import { ConfigurationChangeEvent, ExtensionContext, TreeView, window, workspace } from 'vscode';
+import { commands, ConfigurationChangeEvent, ExtensionContext, TreeView, window, workspace } from 'vscode';
 import { BinanceProvider } from './explorer/binanceProvider';
 import BinanceService from './explorer/binanceService';
 import { ForexProvider } from './explorer/forexProvider';
@@ -92,6 +92,13 @@ export async function activate(context: ExtensionContext) {
   stockTreeView = window.createTreeView('leekFundView.stock', {
     treeDataProvider: nodeStockProvider,
   });
+
+  // 收起全部分组：TreeView API 无 collapseAll，调用 VSCode 自动生成的 collapseAll 命令
+  context.subscriptions.push(
+    commands.registerCommand('leek-fund.collapseStockGroups', () => {
+      commands.executeCommand('workbench.actions.treeView.leekFundView.stock.collapseAll');
+    })
+  );
 
   binanceTreeView = window.createTreeView('leekFundView.binance', {
     treeDataProvider: binanceProvider,

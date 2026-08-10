@@ -242,7 +242,7 @@
       },
       {
         "command": "leek-fund.collapseStockGroups",
-        "title": "收起/展开全部分组",
+        "title": "收起全部分组",
         "icon": "$(collapse-all)"
       },
       {
