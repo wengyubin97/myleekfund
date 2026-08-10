@@ -13,6 +13,7 @@ const COLOR_GRAY: [number, number, number] = [150, 150, 150];
 const COLOR_UP: [number, number, number] = [240, 82, 82];
 const COLOR_DOWN: [number, number, number] = [64, 175, 84];
 const COLOR_AVG: [number, number, number] = [240, 200, 40]; // 均价线（黄）
+const VOLUME_AREA_H = 26; // 分时量柱区域高度（px）
 
 export type TrendSignal = {
   level: 'extreme' | 'fast';
@@ -253,6 +254,23 @@ export function buildEqualWeightAvgPriceCurve(records: Array<MinuteRecord>): Arr
   });
 }
 
+/** 计算每分钟成交量（累计量的差分，跨成分股求和），用于分时量柱 */
+export function buildVolumeMap(records: Array<MinuteRecord>): Map<string, number> {
+  const map = new Map<string, number>();
+  records.forEach((record) => {
+    let prev = 0;
+    record.points.forEach((point) => {
+      const cum = point.volume || 0;
+      const minuteVol = cum - prev;
+      prev = cum;
+      if (minuteVol > 0) {
+        map.set(point.time, (map.get(point.time) || 0) + minuteVol);
+      }
+    });
+  });
+  return map;
+}
+
 /* ---------- 最小 PNG 编码器（RGBA，zlib 压缩） ---------- */
 
 const CRC_TABLE = (() => {
@@ -465,7 +483,8 @@ export function renderChartPng(
   curve: Array<CurvePoint>,
   width = 420,
   height = 170,
-  avgCurve?: Array<CurvePoint>
+  avgCurve?: Array<CurvePoint>,
+  volumes?: Map<string, number>
 ): Buffer {
   const rgba = Buffer.alloc(width * height * 4);
   if (!curve.length) {
@@ -475,7 +494,8 @@ export function renderChartPng(
   const padding = 8;
   const leftPad = 74; // 左侧留出 MAX/MIN/零轴标注空间
   const chartW = width - leftPad - padding;
-  const chartH = height - padding * 2;
+  // 底部预留 VOLUME_AREA_H 画分时量柱
+  const chartH = height - padding * 2 - VOLUME_AREA_H;
   const midY = padding + chartH / 2;
   const pcts = curve.map((point) => point.pct);
   const avgPcts = avgCurve ? avgCurve.map((point) => point.pct) : [];
@@ -633,6 +653,25 @@ export function renderChartPng(
       badgeColor
     );
   }
+  // 分时量柱状图（底部）：红=该分钟上涨，绿=该分钟下跌
+  if (volumes && volumes.size) {
+    const volBottom = height - padding;
+    const volMax = Math.max(...Array.from(volumes.values()), 1);
+    for (let i = 0; i < N; i++) {
+      const vol = volumes.get(curve[i].time) || 0;
+      if (vol <= 0) {
+        continue;
+      }
+      const barH = Math.max(1, Math.round((vol / volMax) * VOLUME_AREA_H));
+      const up = i === 0 ? pcts[i] >= 0 : pcts[i] >= pcts[i - 1];
+      const barColor: [number, number, number] = up ? COLOR_UP : COLOR_DOWN;
+      const x = Math.round(toX(i));
+      for (let dy = 0; dy <= barH; dy++) {
+        setPixel(rgba, width, height, x, volBottom - dy, barColor, 200);
+        setPixel(rgba, width, height, x + 1, volBottom - dy, barColor, 200);
+      }
+    }
+  }
   return encodePng(width, height, rgba);
 }
 
@@ -658,7 +697,8 @@ export function renderRecordsToUri(records: Array<MinuteRecord>): string | null 
     return null;
   }
   const avgCurve = buildEqualWeightAvgPriceCurve(records);
-  const png = renderChartPng(curve, 420, 170, avgCurve);
+  const volumes = buildVolumeMap(records);
+  const png = renderChartPng(curve, 420, 170, avgCurve, volumes);
   return `data:image/png;base64,${png.toString('base64')}`;
 }
 
