@@ -170,9 +170,18 @@ export class StockProvider implements TreeDataProvider<LeekTreeItem> {
   }
   getStockGroupRootNodes(): LeekTreeItem[] {
     const nodes: Array<LeekTreeItem> = [];
-    globalState.stockGroups.forEach((name, index) => {
+    const groups = globalState.stockGroups.map((name, index) => {
       const codes: Array<string> = globalState.stockGroupStocks[index] || [];
       const avg = calcStockGroupAvgPercent(this.service.stockList, codes);
+      return { name, index, codes, avg };
+    });
+    // 分组按平均涨跌幅降序排列（涨幅高的靠上，无数据排最后）
+    groups.sort((a, b) => {
+      const avgA = a.avg === null ? Number.NEGATIVE_INFINITY : a.avg;
+      const avgB = b.avg === null ? Number.NEGATIVE_INFINITY : b.avg;
+      return avgB - avgA;
+    });
+    groups.forEach(({ name, index, codes, avg }) => {
       const avgText = avg === null ? '' : ` ${avg >= 0 ? '+' : ''}${avg.toFixed(2)}%`;
       nodes.push(
         new LeekTreeItem(
