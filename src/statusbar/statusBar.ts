@@ -463,7 +463,7 @@ export class StatusBar {
       if (hit.limit === 'up') {
         text = `${hit.name} 涨停`;
       } else if (hit.speed5s >= SURGE_FAST_THRESHOLD) {
-        text = `${hit.name} 涨速+${Number(hit.speed5s.toFixed(1))}%${this.gain1mText(hit.gain1m)}`;
+        text = `${hit.name} +${Number(hit.speed5s.toFixed(1))}%${this.gain1mText(hit.gain1m)}`;
       } else {
         text = `${hit.name}${this.gain1mText(hit.gain1m)}`;
       }
