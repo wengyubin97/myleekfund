@@ -12,6 +12,7 @@ import {
   getLatestVolumeCompare,
   getMinuteRecords,
   getStockChartDataUri,
+  getStockFastRiseInfo,
   getStockSignal,
   isMinuteSupported,
   signalLabel,
@@ -35,12 +36,17 @@ export class StatusBar {
   private statusBarList: StatusBarItem[] = [];
   private statusBarGroupList: StatusBarItem[] = [];
   private statusBarGroupNames: string[] = [];
+  /** 分组快速上涨提示条：状态栏最左第一位置（轮动），无信号时隐藏 */
+  private surgeBarItem: StatusBarItem;
   private statusBarItemLabelFormat: string = '';
   constructor(stockService: StockService, fundService: FundService) {
     this.stockService = stockService;
     this.fundService = fundService;
     this.statusBarList = [];
     this.fundBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 3);
+    // priority 高于普通分组（100-index）与个股（3），确保占据最左位置
+    this.surgeBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 200);
+    this.surgeBarItem.hide();
     this.refreshStockStatusBar();
     this.bindEvents();
     /* events.on('updateConfig:leek-fund.statusBarStock',()=>{
@@ -80,6 +86,7 @@ export class StatusBar {
     events.on('stockListUpdate', () => {
       this.refreshStockStatusBar();
       this.refreshStockGroupStatusBar();
+      this.refreshSurgeStatusBar();
     });
     events.on('fundListUpdate', () => {
       this.refreshFundStatusBar();
@@ -90,6 +97,7 @@ export class StatusBar {
     this.refreshFundStatusBar();
     this.refreshStockStatusBar();
     this.refreshStockGroupStatusBar();
+    this.refreshSurgeStatusBar();
   }
 
   /** 切换状态栏显示 */
@@ -361,6 +369,122 @@ export class StatusBar {
     });
     this.statusBarGroupList = [];
     this.statusBarGroupNames = [];
+  }
+
+  /** 格式化涨幅（去掉多余小数，正数带 +） */
+  private formatPct(value: number | null): string {
+    if (value === null || isNaN(value)) {
+      return '--';
+    }
+    const rounded = Number(value.toFixed(1));
+    return `${value >= 0 ? '+' : ''}${rounded}%`;
+  }
+
+  /**
+   * 分组快速上涨提示：状态栏最左第一位置（轮动）。
+   * 遍历状态栏分组，找「快速拉升（最近一分钟涨速达标）+ 当前分钟放量」的个股，
+   * 多个候选取涨速最大的；无信号时隐藏，让普通分组/个股保持原有顺序。
+   */
+  async refreshSurgeStatusBar() {
+    if (this.hideStatusBar || this.hideStatusBarStock) {
+      this.surgeBarItem.hide();
+      return;
+    }
+
+    const groupNames: Array<string> =
+      LeekFundConfig.getConfig('leek-fund.statusBarStockGroups') || [];
+    const candidates: Array<{
+      group: string;
+      avg: number | null;
+      code: string;
+      name: string;
+      percent: string;
+      speed: number;
+      volPct: number;
+    }> = [];
+
+    await Promise.all(
+      groupNames.map(async (name) => {
+        const index = globalState.stockGroups.indexOf(name);
+        if (index === -1) {
+          return;
+        }
+        const codes: Array<string> = globalState.stockGroupStocks[index] || [];
+        const avg = calcStockGroupAvgPercent(this.stockService.stockList, codes);
+        await Promise.all(
+          codes.map(async (code) => {
+            const item = this.stockService.stockList.find((stock) => stock.info.code === code);
+            if (!item) {
+              return;
+            }
+            const records = await getMinuteRecords([code]);
+            const [rise, volCmp] = await Promise.all([
+              getStockFastRiseInfo(code),
+              Promise.resolve(getLatestVolumeCompare(records)),
+            ]);
+            if (!rise || !volCmp || volCmp.cur <= volCmp.prev) {
+              return;
+            }
+            candidates.push({
+              group: name,
+              avg,
+              code,
+              name: item.info.name,
+              percent: item.info.percent,
+              speed: rise.speed,
+              volPct: Math.round((volCmp.cur / volCmp.prev - 1) * 100),
+            });
+          })
+        );
+      })
+    );
+
+    if (!candidates.length) {
+      this.surgeBarItem.hide();
+      return;
+    }
+
+    candidates.sort((a, b) => b.speed - a.speed);
+    const hit = candidates[0];
+    const percentText = parseFloat(hit.percent);
+    const stockPct = isNaN(percentText) ? '--' : this.formatPct(percentText);
+    this.surgeBarItem.text = `${hit.group} ${this.formatPct(hit.avg)} ${hit.name} ${stockPct} 涨速${Number(
+      hit.speed.toFixed(1)
+    )}% 分时放量${hit.volPct}%`;
+    this.surgeBarItem.color = SIGNAL_UP_RED;
+    this.surgeBarItem.command = {
+      title: 'Change stock group',
+      command: 'leek-fund.changeStatusBarGroupItem',
+      arguments: [hit.group],
+    };
+    // tooltip：该股分时图（纯 markdown，不依赖 HTML 渲染）
+    this.updateSurgeTooltip(hit);
+    this.surgeBarItem.show();
+  }
+
+  async updateSurgeTooltip(hit: {
+    group: string;
+    avg: number | null;
+    code: string;
+    name: string;
+    percent: string;
+    speed: number;
+    volPct: number;
+  }) {
+    try {
+      const dataUri = await getStockChartDataUri(hit.code);
+      const lines: Array<string> = [
+        `【分组快速拉升】${hit.group} 平均 ${this.formatPct(hit.avg)}`,
+        `${hit.name}（${hit.code}） ${this.formatPct(parseFloat(hit.percent))}`,
+        `涨速 ${hit.speed.toFixed(2)}%/分钟  当前分钟放量 ${hit.volPct}%`,
+      ];
+      if (dataUri) {
+        lines.push('', `![分时图](${dataUri})`);
+      }
+      this.surgeBarItem.tooltip = new MarkdownString(joinMarkdownLines(lines));
+    } catch (err) {
+      console.error('update surge tooltip error:', err);
+    }
   }
 
   updateGroupBarInfo(
