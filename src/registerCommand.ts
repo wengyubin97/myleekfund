@@ -273,6 +273,11 @@ export function registerViewEvent(
     })
   );
   context.subscriptions.push(
+    commands.registerCommand('leek-fund.collapseStockGroups', () => {
+      stockProvider.toggleGroupsCollapsed();
+    })
+  );
+  context.subscriptions.push(
     commands.registerCommand('leek-fund.renameStockGroup', (target) => {
       if (!target || !target.id) return;
       const index: number = parseInt((target.id || '').replace('stockGroup_', ''));

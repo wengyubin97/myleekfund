@@ -20,6 +20,7 @@ export class StockProvider implements TreeDataProvider<LeekTreeItem> {
   private expandUSStock: boolean;
   private expandCNFuture: boolean;
   private expandOverseaFuture: boolean;
+  private groupsCollapsed = false;
 
   constructor(service: StockService) {
     this.service = service;
@@ -33,6 +34,12 @@ export class StockProvider implements TreeDataProvider<LeekTreeItem> {
 
   refresh(): any {
     this._onDidChangeTreeData.fire(undefined);
+  }
+
+  /** 收起/展开全部分组 */
+  toggleGroupsCollapsed() {
+    this.groupsCollapsed = !this.groupsCollapsed;
+    this.refresh();
   }
 
   getChildren(element?: LeekTreeItem | undefined): LeekTreeItem[] | Thenable<LeekTreeItem[]> {
@@ -90,7 +97,7 @@ export class StockProvider implements TreeDataProvider<LeekTreeItem> {
           (element.id === StockCategory.US && this.expandUSStock) ||
           (element.id === StockCategory.Future && this.expandCNFuture) ||
           (element.id === StockCategory.OverseaFuture && this.expandCNFuture) ||
-          (element.id && element.id.startsWith('stockGroup_'))
+          (element.id && element.id.startsWith('stockGroup_') && !this.groupsCollapsed)
             ? TreeItemCollapsibleState.Expanded
             : TreeItemCollapsibleState.Collapsed,
         // iconPath: this.parseIconPathFromProblemState(element),

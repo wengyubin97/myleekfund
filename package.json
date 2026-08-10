@@ -241,6 +241,11 @@
         "icon": "$(diff-added)"
       },
       {
+        "command": "leek-fund.collapseStockGroups",
+        "title": "收起/展开全部分组",
+        "icon": "$(collapse-all)"
+      },
+      {
         "command": "leek-fund.renameStockGroup",
         "title": "重命名股票分组"
       },
@@ -460,6 +465,11 @@
         },
         {
           "command": "leek-fund.addStockGroup",
+          "when": "view == leekFundView.stock",
+          "group": "navigation"
+        },
+        {
+          "command": "leek-fund.collapseStockGroups",
           "when": "view == leekFundView.stock",
           "group": "navigation"
         },
