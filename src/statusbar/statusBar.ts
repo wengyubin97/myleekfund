@@ -11,6 +11,7 @@ import {
   getLatestVolumeCompare,
   getMinuteRecords,
   getStockChartDataUri,
+  getStockGain1m,
   getStockSignal,
   isMinuteSupported,
   signalLabel,
@@ -369,9 +370,9 @@ export class StatusBar {
   }
 
   /**
-   * 快速涨跌提示：状态栏最左（轮动），涨速条与跌速条各占一位。
-   * 从全部自选股中，按 5 秒轮询价差归一化涨跌速（%/分钟），
-   * 分别取涨速最快与跌速最快的个股显示；无信号时隐藏。
+   * 快速涨跌提示：状态栏最左，涨速条与跌速条常驻（无信号时显示 1min 榜）。
+   * 涨速条候选优先级：涨停 → 5s 涨速达标 → 1min 涨幅最大；
+   * 跌速条对称。显示同时带 5s 涨速与 1min 涨跌幅。
    */
   async refreshSurgeStatusBar() {
     if (this.hideStatusBar || this.hideStatusBarStock) {
@@ -381,74 +382,158 @@ export class StatusBar {
     }
 
     const now = Date.now();
-    const hits: Array<{ code: string; name: string; speed: number }> = [];
-
-    await Promise.all(
-      this.stockService.stockList.map(async (item) => {
+    const stocks = this.stockService.stockList;
+    const metrics = await Promise.all(
+      stocks.map(async (item) => {
         const code = item.info.code;
         const curPrice = parseFloat(item.info.price || '');
         if (isNaN(curPrice) || curPrice <= 0) {
-          return;
+          return null;
         }
+        let speed5s = 0;
         const last = this.surgePriceCache.get(code);
         this.surgePriceCache.set(code, { price: curPrice, time: now });
-        if (!last) {
-          return; // 首次见到，只有一次采样，跳过
+        if (last) {
+          const elapsedSec = (now - last.time) / 1000;
+          // 间隔不合理（闭市轮询拉长/长时间暂停）不判定
+          if (elapsedSec >= 1 && elapsedSec <= 60) {
+            const diffPct = (curPrice / last.price - 1) * 100;
+            speed5s = diffPct * (60 / elapsedSec);
+          }
         }
-        const elapsedSec = (now - last.time) / 1000;
-        // 间隔不合理（闭市轮询拉长/长时间暂停）不判定
-        if (elapsedSec < 1 || elapsedSec > 60) {
-          return;
+        let gain1m: number | null = null;
+        try {
+          gain1m = await getStockGain1m(code);
+        } catch (err) {
+          // 分钟线异常不影响 5s 涨速
         }
-        const diffPct = (curPrice / last.price - 1) * 100;
-        const speed = diffPct * (60 / elapsedSec);
-        if (Math.abs(speed) < SURGE_FAST_THRESHOLD) {
-          return;
-        }
-        hits.push({ code, name: item.info.name || code, speed });
+        const percent = parseFloat(item.info.percent || '');
+        return {
+          code,
+          name: item.info.name || code,
+          percent: isNaN(percent) ? 0 : percent,
+          speed5s,
+          gain1m,
+          limit: this.getLimitState(code, item.info.name || '', percent),
+        };
       })
     );
+    const valid = metrics.filter((m) => m !== null) as Array<{
+      code: string;
+      name: string;
+      percent: number;
+      speed5s: number;
+      gain1m: number | null;
+      limit: 'up' | 'down' | null;
+    }>;
 
     // 清理不再属于自选股的缓存
-    const liveCodes = this.stockService.stockList.map((item) => item.info.code);
+    const liveCodes = stocks.map((item) => item.info.code);
     this.surgePriceCache.forEach((_, code) => {
       if (!liveCodes.includes(code)) {
         this.surgePriceCache.delete(code);
       }
     });
 
-    const upHits = hits.filter((hit) => hit.speed > 0).sort((a, b) => b.speed - a.speed);
-    const downHits = hits.filter((hit) => hit.speed < 0).sort((a, b) => a.speed - b.speed);
-    const upHit = upHits.length ? upHits[0] : null;
-    const downHit = downHits.length ? downHits[0] : null;
+    const sortBySpeed = (a: typeof valid[0], b: typeof valid[0]) => b.speed5s - a.speed5s;
+    const sortByGainAsc = (a: typeof valid[0], b: typeof valid[0]) =>
+      (a.gain1m ?? 0) - (b.gain1m ?? 0);
+    const sortByGainDesc = (a: typeof valid[0], b: typeof valid[0]) =>
+      (b.gain1m ?? 0) - (a.gain1m ?? 0);
+
+    // 涨速条：涨停 > 5s 涨速达标 > 1min 涨幅最大
+    const upLimit = valid.filter((m) => m.limit === 'up').sort((a, b) => b.percent - a.percent);
+    const upFast = valid
+      .filter((m) => m.limit !== 'up' && m.speed5s >= SURGE_FAST_THRESHOLD)
+      .sort(sortBySpeed);
+    const upGain = valid.filter((m) => m.limit !== 'up').sort(sortByGainDesc);
+    // 跌速条：跌停 > 5s 跌速达标 > 1min 跌幅最大
+    const downLimit = valid.filter((m) => m.limit === 'down').sort((a, b) => a.percent - b.percent);
+    const downFast = valid
+      .filter((m) => m.limit !== 'down' && m.speed5s <= -SURGE_FAST_THRESHOLD)
+      .sort(sortBySpeed);
+    const downGain = valid.filter((m) => m.limit !== 'down').sort(sortByGainAsc);
+
+    const upHit = upLimit[0] ?? upFast[0] ?? upGain[0];
+    const downHit = downLimit[0] ?? downFast[0] ?? downGain[0];
 
     if (upHit) {
-      this.surgeUpBarItem.text = `${upHit.name} 涨速${Number(upHit.speed.toFixed(1))}%`;
+      const hit = upHit;
+      let text: string;
+      if (hit.limit === 'up') {
+        text = `${hit.name} 涨停`;
+      } else if (hit.speed5s >= SURGE_FAST_THRESHOLD) {
+        text = `${hit.name} 涨速${Number(hit.speed5s.toFixed(1))}%${this.gain1mText(hit.gain1m)}`;
+      } else {
+        text = `${hit.name}${this.gain1mText(hit.gain1m)}`;
+      }
+      this.surgeUpBarItem.text = text;
       this.surgeUpBarItem.color = SIGNAL_UP_RED;
       this.surgeUpBarItem.command = {
         title: 'Change stock',
         command: 'leek-fund.changeStatusBarItem',
-        arguments: [this.findStockId(upHit.code)],
+        arguments: [this.findStockId(hit.code)],
       };
-      this.updateSurgeTooltip(this.surgeUpBarItem, upHit, '涨');
+      this.updateSurgeTooltip(this.surgeUpBarItem, hit, '涨');
       this.surgeUpBarItem.show();
     } else {
       this.surgeUpBarItem.hide();
     }
 
     if (downHit) {
-      this.surgeDownBarItem.text = `${downHit.name} 跌速${Number(Math.abs(downHit.speed).toFixed(1))}%`;
+      const hit = downHit;
+      let text: string;
+      if (hit.limit === 'down') {
+        text = `${hit.name} 跌停`;
+      } else if (hit.speed5s <= -SURGE_FAST_THRESHOLD) {
+        text = `${hit.name} 跌速${Number(Math.abs(hit.speed5s).toFixed(1))}%${this.gain1mText(hit.gain1m)}`;
+      } else {
+        text = `${hit.name}${this.gain1mText(hit.gain1m)}`;
+      }
+      this.surgeDownBarItem.text = text;
       this.surgeDownBarItem.color = SIGNAL_DOWN_GREEN;
       this.surgeDownBarItem.command = {
         title: 'Change stock',
         command: 'leek-fund.changeStatusBarItem',
-        arguments: [this.findStockId(downHit.code)],
+        arguments: [this.findStockId(hit.code)],
       };
-      this.updateSurgeTooltip(this.surgeDownBarItem, downHit, '跌');
+      this.updateSurgeTooltip(this.surgeDownBarItem, hit, '跌');
       this.surgeDownBarItem.show();
     } else {
       this.surgeDownBarItem.hide();
     }
+  }
+
+  /** 1min 涨跌幅文本（无数据返回空串） */
+  private gain1mText(gain1m: number | null): string {
+    if (gain1m === null || isNaN(gain1m)) {
+      return '';
+    }
+    return ` 1min${gain1m >= 0 ? '+' : ''}${Number(gain1m.toFixed(1))}%`;
+  }
+
+  /** A股涨跌停判定（主板 10%、创业/科创 20%、北交所 30%、ST 5%）；港股/美股/期货无涨跌停 */
+  private getLimitState(code: string, name: string, percent: number): 'up' | 'down' | null {
+    const match = code.match(/^(sh|sz|bj)(\d{6})/);
+    if (!match) {
+      return null;
+    }
+    const num = match[2];
+    let threshold = 10;
+    if (/^(688|30)/.test(num)) {
+      threshold = 20;
+    } else if (/^[48]/.test(num)) {
+      threshold = 30;
+    } else if (/ST/i.test(name)) {
+      threshold = 5;
+    }
+    if (percent >= threshold - 0.1) {
+      return 'up';
+    }
+    if (percent <= -(threshold - 0.1)) {
+      return 'down';
+    }
+    return null;
   }
 
   /** 按代码查找自选股条目 id（用于切换状态栏展示） */
@@ -459,14 +544,23 @@ export class StatusBar {
 
   async updateSurgeTooltip(
     barItem: StatusBarItem,
-    hit: { code: string; name: string; speed: number },
+    hit: {
+      code: string;
+      name: string;
+      percent: number;
+      speed5s: number;
+      gain1m: number | null;
+      limit: 'up' | 'down' | null;
+    },
     direction: '涨' | '跌'
   ) {
     try {
       const dataUri = await getStockChartDataUri(hit.code);
       const lines: Array<string> = [
-        `${hit.name}（${hit.code}）`,
-        `${direction}速 ${Math.abs(hit.speed).toFixed(2)}%/分钟`,
+        `${hit.name}（${hit.code}） ${hit.percent >= 0 ? '+' : ''}${hit.percent}%`,
+        `${direction}速 ${Math.abs(hit.speed5s).toFixed(2)}%/分钟  1min ${
+          hit.gain1m === null ? '--' : `${hit.gain1m >= 0 ? '+' : ''}${hit.gain1m.toFixed(2)}%`
+        }`,
       ];
       if (dataUri) {
         lines.push('', `![分时图](${dataUri})`);

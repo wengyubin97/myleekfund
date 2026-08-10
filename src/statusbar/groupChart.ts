@@ -76,6 +76,27 @@ async function getSignalFor(codes: Array<string>): Promise<TrendSignal> {
 
 export const getStockSignal = (code: string): Promise<TrendSignal> => getSignalFor([code]);
 
+/**
+ * 个股最近 1 分钟涨跌幅（%）：分钟线最后两根差分（盘中最后一根滚动刷新）。
+ * 复用 getMinuteRecords 的 30 秒缓存；时间缺口或无数据时返回 null。
+ */
+export async function getStockGain1m(code: string): Promise<number | null> {
+  if (!isMinuteSupported(code)) {
+    return null;
+  }
+  const records = await getMinuteRecords([code]);
+  const curve = buildEqualWeightCurve(records);
+  if (curve.length < 2) {
+    return null;
+  }
+  const prev = curve[curve.length - 2];
+  const last = curve[curve.length - 1];
+  if (minuteOf(last.time) - minuteOf(prev.time) > 1) {
+    return null;
+  }
+  return last.pct - prev.pct;
+}
+
 export const getGroupSignal = (codes: Array<string>): Promise<TrendSignal> =>
   getSignalFor(codes);
 
