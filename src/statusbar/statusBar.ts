@@ -12,7 +12,6 @@ import {
   getLatestVolumeCompare,
   getMinuteRecords,
   getStockChartDataUri,
-  getStockFastRiseInfo,
   getStockSignal,
   isMinuteSupported,
   signalLabel,
@@ -28,6 +27,9 @@ const SIGNAL_UP_RED = '#E53935';
 const SIGNAL_DOWN_GREEN = '#00B050';
 /** 闪烁间隙/无数据时的灰色 */
 const BAR_GRAY = '#A0A0A0';
+/** 轮询涨速阈值（归一化 %/分钟）：5 秒轮询约 0.04%/5s，极速 1.5%/分钟约 0.13%/5s */
+const SURGE_FAST_THRESHOLD = 0.5;
+const SURGE_EXTREME_THRESHOLD = 1.5;
 
 export class StatusBar {
   private stockService: StockService;
@@ -38,6 +40,8 @@ export class StatusBar {
   private statusBarGroupNames: string[] = [];
   /** 分组快速上涨提示条：状态栏最左第一位置（轮动），无信号时隐藏 */
   private surgeBarItem: StatusBarItem;
+  /** 上次轮询价缓存（用于 5 秒轮询涨速判定） */
+  private surgePriceCache: Map<string, { price: number; time: number }> = new Map();
   private statusBarItemLabelFormat: string = '';
   constructor(stockService: StockService, fundService: FundService) {
     this.stockService = stockService;
@@ -382,8 +386,9 @@ export class StatusBar {
 
   /**
    * 分组快速上涨提示：状态栏最左第一位置（轮动）。
-   * 遍历状态栏分组，找「快速拉升（最近一分钟涨速达标）+ 当前分钟放量」的个股，
-   * 多个候选取涨速最大的；无信号时隐藏，让普通分组/个股保持原有顺序。
+   * 涨速基于行情轮询（默认 5 秒）相邻两次价格差，归一化为 %/分钟；
+   * 叠加当前分钟放量（分钟线，30 秒缓存）判定。多个候选取涨速最大的；
+   * 无信号时隐藏，让普通分组/个股保持原有顺序。
    */
   async refreshSurgeStatusBar() {
     if (this.hideStatusBar || this.hideStatusBarStock) {
@@ -391,6 +396,7 @@ export class StatusBar {
       return;
     }
 
+    const now = Date.now();
     const groupNames: Array<string> =
       LeekFundConfig.getConfig('leek-fund.statusBarStockGroups') || [];
     const candidates: Array<{
@@ -402,6 +408,7 @@ export class StatusBar {
       speed: number;
       volPct: number;
     }> = [];
+    const liveCodes: Array<string> = [];
 
     await Promise.all(
       groupNames.map(async (name) => {
@@ -411,18 +418,37 @@ export class StatusBar {
         }
         const codes: Array<string> = globalState.stockGroupStocks[index] || [];
         const avg = calcStockGroupAvgPercent(this.stockService.stockList, codes);
+        liveCodes.push(...codes);
         await Promise.all(
           codes.map(async (code) => {
             const item = this.stockService.stockList.find((stock) => stock.info.code === code);
             if (!item) {
               return;
             }
+            // 涨速：相邻两次轮询价差，归一化到 %/分钟
+            const curPrice = parseFloat(item.info.price || '');
+            if (isNaN(curPrice) || curPrice <= 0) {
+              return;
+            }
+            const last = this.surgePriceCache.get(code);
+            this.surgePriceCache.set(code, { price: curPrice, time: now });
+            if (!last) {
+              return; // 首次见到，只有一次采样，跳过
+            }
+            const elapsedSec = (now - last.time) / 1000;
+            // 间隔不合理（闭市轮询拉长/长时间暂停）不判定
+            if (elapsedSec < 1 || elapsedSec > 60) {
+              return;
+            }
+            const diffPct = (curPrice / last.price - 1) * 100;
+            const speed = diffPct * (60 / elapsedSec);
+            if (speed < SURGE_FAST_THRESHOLD) {
+              return;
+            }
+            // 放量判定：当前分钟量 > 上一根（分钟线 30 秒缓存）
             const records = await getMinuteRecords([code]);
-            const [rise, volCmp] = await Promise.all([
-              getStockFastRiseInfo(code),
-              Promise.resolve(getLatestVolumeCompare(records)),
-            ]);
-            if (!rise || !volCmp || volCmp.cur <= volCmp.prev) {
+            const volCmp = getLatestVolumeCompare(records);
+            if (!volCmp || volCmp.cur <= volCmp.prev) {
               return;
             }
             candidates.push({
@@ -431,13 +457,20 @@ export class StatusBar {
               code,
               name: item.info.name,
               percent: item.info.percent,
-              speed: rise.speed,
+              speed,
               volPct: Math.round((volCmp.cur / volCmp.prev - 1) * 100),
             });
           })
         );
       })
     );
+
+    // 清理不再属于当前分组的缓存
+    this.surgePriceCache.forEach((_, code) => {
+      if (!liveCodes.includes(code)) {
+        this.surgePriceCache.delete(code);
+      }
+    });
 
     if (!candidates.length) {
       this.surgeBarItem.hide();

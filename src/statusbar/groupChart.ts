@@ -76,39 +76,6 @@ async function getSignalFor(codes: Array<string>): Promise<TrendSignal> {
 
 export const getStockSignal = (code: string): Promise<TrendSignal> => getSignalFor([code]);
 
-export type FastRiseInfo = {
-  speed: number; // 最近一分钟涨幅（%/分钟）
-  level: 'extreme' | 'fast';
-};
-
-/**
- * 个股最近一分钟的上涨速度（%/分钟）；非快速上涨或向下时返回 null。
- * 复用 getMinuteRecords 的 30 秒缓存，不额外发请求。
- */
-export async function getStockFastRiseInfo(code: string): Promise<FastRiseInfo | null> {
-  if (!isMinuteSupported(code)) {
-    return null;
-  }
-  const records = await getMinuteRecords([code]);
-  const curve = buildEqualWeightCurve(records);
-  if (curve.length < 2) {
-    return null;
-  }
-  const prev = curve[curve.length - 2];
-  const last = curve[curve.length - 1];
-  if (minuteOf(last.time) - minuteOf(prev.time) > 1) {
-    return null;
-  }
-  const diffPct = last.pct - prev.pct;
-  if (diffPct <= 0 || diffPct < FAST_MOVE_THRESHOLD) {
-    return null;
-  }
-  return {
-    speed: diffPct,
-    level: diffPct >= FULL_SAT_SPEED ? 'extreme' : 'fast',
-  };
-}
-
 export const getGroupSignal = (codes: Array<string>): Promise<TrendSignal> =>
   getSignalFor(codes);
 
