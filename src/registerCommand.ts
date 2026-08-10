@@ -340,6 +340,49 @@ export function registerViewEvent(
     })
   );
   context.subscriptions.push(
+    commands.registerCommand('leek-fund.addStockToGroupFromGroup', (target) => {
+      if (!target || !target.id) return;
+      if (!globalState.stockGroups.length) {
+        window.showInformationMessage('请先创建股票分组（点击股票视图标题栏的"添加分组"按钮）');
+        return;
+      }
+      // 分组内 ➕ 按钮：搜索股票并直接加入该分组（自动也会加入自选列表）
+      const qp = window.createQuickPick();
+      qp.items = [{ label: '请输入关键词查询，如：0000001 或 上证指数; 期货输入大写字母开头' }];
+      let code: string | undefined;
+      let timer: NodeJS.Timeout | null = null;
+      qp.onDidChangeValue((value) => {
+        qp.busy = true;
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        timer = setTimeout(async () => {
+          const res = await stockService.getStockSuggestList(value);
+          qp.items = res;
+          qp.busy = false;
+        }, 100);
+      });
+      qp.onDidChangeSelection((e) => {
+        if (e[0].description) {
+          code = e[0].label && e[0].label.split(' | ')[0];
+        }
+      });
+      qp.show();
+      qp.onDidAccept(() => {
+        if (!code) {
+          return;
+        }
+        const newCode = code.replace('gb', 'gb_').replace('us', 'usr_');
+        LeekFundConfig.addStockToGroupCfg(target.id, newCode, () => {
+          stockProvider.refresh();
+        });
+        qp.hide();
+        qp.dispose();
+      });
+    })
+  );
+  context.subscriptions.push(
     commands.registerCommand('leek-fund.removeStockFromGroup', (target) => {
       if (!target || !target.id) return;
       LeekFundConfig.removeStockFromGroupCfg(target.id, () => {

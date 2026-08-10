@@ -209,8 +209,27 @@ export class StockProvider implements TreeDataProvider<LeekTreeItem> {
           clone.contextValue = 'stockGroupItem';
           return clone;
         });
+      // 分组内常驻「➕ 添加股票到此分组」行（点击搜索并直接加入该分组，无需从 A stock 绕道）
+      const addRow = new LeekTreeItem(
+        Object.assign({ contextValue: 'stockGroupAdd' }, defaultFundInfo, {
+          id: `stockGroupAdd_${index}`,
+          name: '➕ 添加股票到此分组',
+        }),
+        undefined
+      );
+      addRow.id = `stockGroupAdd_${index}`;
+      addRow.label = '➕ 添加股票到此分组';
+      addRow.description = '';
+      addRow.contextValue = 'stockGroupAdd';
+      addRow.iconPath = undefined;
+      addRow.tooltip = '搜索股票并加入此分组（自动加入自选列表）';
+      addRow.command = {
+        title: 'Add stock to group',
+        command: 'leek-fund.addStockToGroupFromGroup',
+        arguments: [{ id: `stockGroup_${index}` }],
+      };
       enrichStockTooltips(clones);
-      return clones;
+      return [addRow, ...clones];
     });
   }
   getAStockNodes(stocks: Promise<LeekTreeItem[]>): Promise<LeekTreeItem[]> {

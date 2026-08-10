@@ -261,6 +261,11 @@
         "title": "添加到分组"
       },
       {
+        "command": "leek-fund.addStockToGroupFromGroup",
+        "title": "向分组添加股票",
+        "icon": "$(add)"
+      },
+      {
         "command": "leek-fund.removeStockFromGroup",
         "title": "从分组移除"
       },
@@ -537,37 +542,37 @@
         },
         {
           "command": "leek-fund.setStockTop",
-          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup  && viewItem!=nodata",
+          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup  && viewItem!=nodata && viewItem != stockGroupAdd",
           "group": "group1"
         },
         {
           "command": "leek-fund.setStockUp",
-          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup  && viewItem!=nodata",
+          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup  && viewItem!=nodata && viewItem != stockGroupAdd",
           "group": "group1"
         },
         {
           "command": "leek-fund.setStockDown",
-          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup  && viewItem!=nodata",
+          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup  && viewItem!=nodata && viewItem != stockGroupAdd",
           "group": "group1"
         },
         {
           "command": "leek-fund.stockTrendPic",
-          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup && viewItem!=nodata",
+          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup && viewItem!=nodata && viewItem != stockGroupAdd",
           "group": "group2"
         },
         {
           "command": "leek-fund.setStockTop",
-          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup && viewItem!=nodata",
+          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup && viewItem!=nodata && viewItem != stockGroupAdd",
           "group": "inline"
         },
         {
           "command": "leek-fund.setStockUp",
-          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup && viewItem!=nodata",
+          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup && viewItem!=nodata && viewItem != stockGroupAdd",
           "group": "inline"
         },
         {
           "command": "leek-fund.setStockDown",
-          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup && viewItem!=nodata",
+          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup && viewItem!=nodata && viewItem != stockGroupAdd",
           "group": "inline"
         },
         {
@@ -577,17 +582,17 @@
         },
         {
           "command": "leek-fund.deleteStock",
-          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup",
+          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup && viewItem != stockGroupAdd",
           "group": "group5"
         },
         {
           "command": "leek-fund.addStockToBar",
-          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup",
+          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup && viewItem != stockGroupAdd",
           "group": "group6"
         },
         {
           "command": "leek-fund.addStockToGroup",
-          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup && viewItem != nodata",
+          "when": "view == leekFundView.stock && viewItem != category && viewItem != stockGroup && viewItem != nodata && viewItem != stockGroupAdd",
           "group": "group6"
         },
         {
