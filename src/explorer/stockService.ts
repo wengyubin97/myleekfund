@@ -11,7 +11,7 @@ import { LeekService } from './leekService';
 import moment = require('moment');
 import momentTz = require('moment-timezone');
 import Log from '../shared/log';
-import { getTencentHKStockData, searchStockList } from '../shared/tencentStock';
+import { getTencentAStockData, getTencentHKStockData, searchStockList } from '../shared/tencentStock';
 
 export default class StockService extends LeekService {
   public stockList: Array<LeekTreeItem> = [];
@@ -88,7 +88,122 @@ export default class StockService extends LeekService {
     return res;
   }
 
+  /** A股实时行情走腾讯（更快更稳）；美股/期货走 getSinaStockData（新浪，保留原逻辑） */
   async getStockData(codes: Array<string>): Promise<Array<LeekTreeItem>> {
+    if ((codes && codes.length === 0) || !codes) {
+      return [];
+    }
+    const tencentCodes = codes.filter((code) => /^(sh|sz|bj)/.test(code));
+    const sinaCodes = codes.filter((code) => !/^(sh|sz|bj)/.test(code));
+    let stockList: Array<LeekTreeItem> = [];
+    if (tencentCodes.length) {
+      stockList = stockList.concat(await this.getAStockFromTencent(tencentCodes));
+    }
+    if (sinaCodes.length) {
+      stockList = stockList.concat(await this.getSinaStockData(sinaCodes));
+    }
+    return stockList;
+  }
+
+  /** A股实时行情（腾讯接口），结构参照 getHKStockData */
+  private async getAStockFromTencent(codes: Array<string>): Promise<Array<LeekTreeItem>> {
+    let aStockCount = 0;
+    let noDataStockCount = 0;
+    let stockList: Array<LeekTreeItem> = [];
+    try {
+      const stockData = await getTencentAStockData(codes);
+      if (!stockData) {
+        return [];
+      }
+      const stockPrice: {
+        [key: string]: {
+          amount: number;
+          earnings: number;
+          name: string;
+          price: string;
+          unitPrice: number;
+          todayUnitPrice: number;
+          isSellOut: boolean;
+        };
+      } = globalState.stockPrice;
+      stockData.forEach((item: any) => {
+        if (item.name === 'NODATA') {
+          noDataStockCount += 1;
+          const stockItem = {
+            code: item.code,
+            name: `接口不支持该股票 ${item.code}`,
+            showLabel: this.showLabel,
+            isStock: true,
+            percent: '',
+            type: 'nodata',
+            contextValue: 'nodata',
+          };
+          const treeItem = new LeekTreeItem(stockItem, this.context);
+          stockList.push(treeItem);
+          return;
+        }
+        const { open, yestclose, price, high, low, volume, amount, time, code } = item;
+        const fixedNumber = calcFixedPriceNumber(open, yestclose, price, high, low);
+        const profitData = stockPrice[code] || {};
+        const heldData: HeldData = {};
+        if (profitData.amount) {
+          // 表示是持仓股
+          heldData.heldAmount = profitData.amount;
+          heldData.heldPrice = profitData.unitPrice;
+          heldData.todayHeldPrice = profitData.todayUnitPrice;
+          heldData.isSellOut = profitData.isSellOut;
+        }
+        const stockItem: any = {
+          ...item,
+          open: formatNumber(open, fixedNumber, false),
+          yestclose: formatNumber(yestclose, fixedNumber, false),
+          price: formatNumber(price, fixedNumber, false),
+          low: formatNumber(low, fixedNumber, false),
+          high: formatNumber(high, fixedNumber, false),
+          volume: formatNumber(volume || 0, 2),
+          amount: formatNumber(amount || 0, 2),
+          percent: '',
+          time: moment(time, 'YYYYMMDDHHmmss').format('YYYY-MM-DD HH:mm:ss'),
+          ...heldData,
+        };
+        aStockCount += 1;
+        const { yestclose: yc, open: o } = stockItem;
+        let { price: p } = stockItem;
+        // 竞价阶段部分开盘和价格为0.00导致显示 -100%
+        if (Number(o) <= 0 && Number(p) <= 0) {
+          p = yc;
+        }
+        stockItem.showLabel = this.showLabel;
+        stockItem.isStock = true;
+        stockItem.type = code.substr(0, 2);
+        stockItem.symbol = code.substr(2);
+        stockItem.contextValue = 'aStock';
+        stockItem.updown = formatNumber(+p - +yc, fixedNumber, false);
+        stockItem.percent =
+          (stockItem.updown >= 0 ? '+' : '-') +
+          formatNumber((Math.abs(stockItem.updown) / +yc) * 100, 2, false);
+        const treeItem = new LeekTreeItem(stockItem, this.context);
+        stockList.push(treeItem);
+      });
+    } catch (err) {
+      console.info(codes);
+      console.error(err);
+      if (globalState.showStockErrorInfo) {
+        window.showErrorMessage(`fail: A Stock error ` + codes);
+        globalState.showStockErrorInfo = false;
+        globalState.telemetry.sendEvent('error: stockService', {
+          codes,
+          error: err,
+        });
+      }
+    }
+    globalState.aStockCount = aStockCount;
+    globalState.noDataStockCount += noDataStockCount;
+    return stockList;
+  }
+
+  /** 美股/期货等实时行情（新浪接口，保留原解析） */
+  private async getSinaStockData(codes: Array<string>): Promise<Array<LeekTreeItem>> {
     if ((codes && codes.length === 0) || !codes) {
       return [];
     }
@@ -518,7 +633,6 @@ export default class StockService extends LeekService {
       }
     }
 
-    globalState.aStockCount = aStockCount;
     globalState.usStockCount = usStockCount;
     globalState.cnfStockCount = cnfStockCount;
     globalState.hfStockCount = hfStockCount;

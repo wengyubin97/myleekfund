@@ -26,6 +26,42 @@ export const searchStockList = async (keyword: string) => {
   return stockList;
 };
 
+/** A股（sh/sz/bj）实时行情：腾讯 JSON 接口，字段索引与港股一致 */
+export const getTencentAStockData = async (codes: string[]) => {
+  const stockDataResponse = await Axios.get(stockDataUrl, {
+    responseType: 'arraybuffer',
+    params: {
+      q: codes.join(','),
+      fmt: 'json',
+    },
+    transformResponse: [
+      (data) => {
+        const body = decode(data, 'GBK');
+        return JSON.parse(body);
+      },
+    ],
+  });
+  return codes.map((code) => {
+    const codeConfiged = code.toLowerCase();
+    const arr = stockDataResponse.data[codeConfiged];
+    if (!arr) {
+      return { code: codeConfiged, name: 'NODATA' };
+    }
+    return {
+      code: codeConfiged,
+      name: arr[1],
+      price: arr[3],
+      yestclose: arr[4],
+      open: arr[5],
+      high: arr[33],
+      low: arr[34],
+      volume: arr[36],
+      amount: Number(arr[37]) * 10000, // 腾讯成交额单位为万元，转为元
+      time: arr[30],
+    };
+  });
+};
+
 export const getTencentHKStockData = async (codes: string[]) => {
   // Log.info('before getStockData codes: ', codes);
   const stockDataResponse = await Axios.get(stockDataUrl, {
