@@ -32,7 +32,6 @@ import { cacheStockPriceData, updateStockPrice } from './webview/setStockPrice';
 import { startProxyServer } from './webview/proxyService/proxyService';
 import createEastMoneyDataServer from './service/eastmoney';
 import { checkBreakRiskAll } from './service/breakRiskService';
-import { BreakRiskProvider } from './explorer/breakRiskProvider';
 
 let loopTimer: NodeJS.Timeout | null = null;
 let binanceLoopTimer: NodeJS.Timeout | null = null;
@@ -46,7 +45,6 @@ let breakCheckedDate = '';
 
 let flashNewsOutputServer: FlashNewsOutputServer | null = null;
 let profitBar: ProfitStatusBar | null = null;
-let breakRiskProvider: BreakRiskProvider | null = null;
 
 export async function activate(context: ExtensionContext) {
   globalState.isDevelopment = process.env.NODE_ENV === 'development';
@@ -88,12 +86,6 @@ export async function activate(context: ExtensionContext) {
 
   const statusBar = new StatusBar(stockService, fundService);
   profitBar = new ProfitStatusBar();
-
-  // 破位风控侧边栏视图
-  breakRiskProvider = new BreakRiskProvider();
-  window.createTreeView('leekFundView.breakRisk', {
-    treeDataProvider: breakRiskProvider,
-  });
 
   // create fund & stock side views
   fundTreeView = window.createTreeView('leekFundView.fund', {
@@ -166,8 +158,8 @@ export async function activate(context: ExtensionContext) {
       const hhmm = now.getHours() * 60 + now.getMinutes();
       if (breakCheckedDate !== todayKey && hhmm >= 14 * 60 + 55 && hhmm < 15 * 60) {
         breakCheckedDate = todayKey;
-        checkBreakRiskAll(stockService).then((result) => {
-          breakRiskProvider?.setOutcomes(result.outcomes, result.checkedAt);
+        checkBreakRiskAll(stockService).then(() => {
+          nodeStockProvider.refresh();
         });
       }
     } else {
@@ -248,8 +240,7 @@ export async function activate(context: ExtensionContext) {
     newsProvider,
     flashNewsOutputServer,
     binanceProvider,
-    forexProvider,
-    breakRiskProvider
+    forexProvider
   );
 
   // register command

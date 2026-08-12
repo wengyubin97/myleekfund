@@ -144,6 +144,15 @@ export class LeekTreeItem extends TreeItem {
               percent: risePercent,
             }
           );
+          // 破位风控标记（SELL_NOW / OBSERVE 追加到名称后；HOLD 不显示）
+          const risk = globalState.breakRiskOutcomes?.[info.code];
+          if (risk && risk.decision !== 'HOLD') {
+            const suffix =
+              risk.decision === 'SELL_NOW'
+                ? ' 🔴SELL'
+                : ` 🟡观察${typeof risk.days === 'number' ? risk.days : ''}`;
+            text = `${text}${suffix}`;
+          }
         }
       } else if (isFundItem) {
         /* text =

@@ -1,5 +1,6 @@
 import axios from 'axios';
 import StockService from '../explorer/stockService';
+import globalState from '../globalState';
 import { LeekTreeItem } from '../shared/leekTreeItem';
 import { LeekFundConfig } from '../shared/leekConfig';
 import {
@@ -99,6 +100,7 @@ export interface BreakCheckOutcome {
   decision: string;
   reason: string;
   isWatchStart: boolean; // 本次是否新触发观察期
+  days?: number; // 观察期已观察天数（OBSERVE 时）
 }
 
 export interface BreakCheckResult {
@@ -151,7 +153,14 @@ export async function checkBreakRiskForStock(
         states.map((state) => (state.code === code ? nextState : state))
       );
     }
-    outcome = { code, name, decision, reason, isWatchStart: false };
+    outcome = {
+      code,
+      name,
+      decision,
+      reason,
+      isWatchStart: false,
+      days: decision === 'OBSERVE' ? nextState.days : undefined,
+    };
   } else {
     const result = evaluateBreak(input);
     if (result.decision === 'OBSERVE') {
@@ -167,7 +176,14 @@ export async function checkBreakRiskForStock(
       saveWatchStates([...states.filter((state) => state.code !== code), nextState]);
       isWatchStart = true;
     }
-    outcome = { code, name, decision: result.decision, reason: result.reason, isWatchStart };
+    outcome = {
+      code,
+      name,
+      decision: result.decision,
+      reason: result.reason,
+      isWatchStart,
+      days: result.decision === 'OBSERVE' ? 1 : undefined,
+    };
   }
   return outcome;
 }
@@ -193,5 +209,10 @@ export async function checkBreakRiskAll(stockService: StockService): Promise<Bre
   );
   const d = new Date();
   const pad = (n: number) => (n < 10 ? `0${n}` : String(n));
+  // 写入全局状态供 Stock 视图追加破位标记
+  globalState.breakRiskOutcomes = {};
+  outcomes.forEach((o) => {
+    globalState.breakRiskOutcomes[o.code] = { decision: o.decision, reason: o.reason, days: o.days };
+  });
   return { outcomes, checkedAt: `${pad(d.getHours())}:${pad(d.getMinutes())}` };
 }

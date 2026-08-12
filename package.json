@@ -64,10 +64,6 @@
           "name": "Stock"
         },
         {
-          "id": "leekFundView.breakRisk",
-          "name": "破位风控"
-        },
-        {
           "id": "leekFundView.news",
           "name": "XueQiu News"
         },
@@ -946,10 +942,6 @@
       }
     },
     "viewsWelcome": [
-      {
-        "view": "leekFundView.breakRisk",
-        "contents": "尾盘 14:55 自动检查破位，或运行 [Leek: 破位风控检查](command:leek-fund.breakRiskCheck)"
-      },
       {
         "view": "选股宝快讯、AI助手",
         "contents": "\n [📰 选股宝快讯、AI助手](command:leek-fund.xuangubaoNews)"

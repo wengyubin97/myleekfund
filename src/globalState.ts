@@ -45,6 +45,9 @@ let stockGroupStocks: Array<Array<string>> = [];
 let stockPrice = {}; // 缓存数据
 let stockPriceCacheDate = '2020-10-30';
 
+/** 破位风控检查结果：code -> { decision, reason, days } */
+let breakRiskOutcomes: Record<string, { decision: string; reason: string; days?: number }> = {};
+
 let forexList: Array<ForexData> = []; // 外汇信息
 
 // 选股宝快讯数据
@@ -99,6 +102,8 @@ export default {
   stockHeldTipShow,
 
   forexList,
+
+  breakRiskOutcomes,
 
   xuanGuBaoNews
 };

@@ -22,7 +22,6 @@ function getDefaultSettingsPath(filename: string = 'leek-fund.settings.json'): s
 import fundCodeList from './data/fundcodeSearch';
 import { BinanceProvider } from './explorer/binanceProvider';
 import BinanceService from './explorer/binanceService';
-import { BreakRiskProvider } from './explorer/breakRiskProvider';
 import { ForexProvider } from './explorer/forexProvider';
 import { FundProvider } from './explorer/fundProvider';
 import FundService from './explorer/fundService';
@@ -66,8 +65,7 @@ export function registerViewEvent(
   newsProvider: NewsProvider,
   flashNewsOutputServer: FlashNewsOutputServer,
   binanceProvider: BinanceProvider,
-  forexProvider: ForexProvider,
-  breakRiskProvider: BreakRiskProvider
+  forexProvider: ForexProvider
 ) {
   const newsService = new NewsService();
   const binanceService = new BinanceService(context);
@@ -76,10 +74,9 @@ export function registerViewEvent(
     commands.registerCommand('leek-fund.breakRiskCheck', async () => {
       const { checkBreakRiskAll } = await import('./service/breakRiskService');
       const result = await checkBreakRiskAll(stockService);
-      breakRiskProvider?.setOutcomes(result.outcomes, result.checkedAt);
-      commands.executeCommand('workbench.view.extension.leekFundMenu');
+      stockProvider.refresh();
       window.setStatusBarMessage(
-        `破位风控检查完成：${result.outcomes.length} 只，见侧边栏「破位风控」视图`,
+        `破位风控检查完成：${result.outcomes.length} 只，破位标记已更新到股票列表`,
         5000
       );
     })
