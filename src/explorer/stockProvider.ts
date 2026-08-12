@@ -183,11 +183,13 @@ export class StockProvider implements TreeDataProvider<LeekTreeItem> {
     });
     groups.forEach(({ name, index, codes, avg }) => {
       const avgText = avg === null ? '' : ` ${avg >= 0 ? '+' : ''}${avg.toFixed(2)}%`;
+      // 破位风控标记：组内存在 SELL_NOW / OBSERVE 时追加（便于快速定位）
+      const riskSuffix = this.getGroupRiskSuffix(codes);
       nodes.push(
         new LeekTreeItem(
           Object.assign({ contextValue: 'stockGroup' }, defaultFundInfo, {
             id: `stockGroup_${index}`,
-            name: `${name}${codes.length > 0 ? `(${codes.length})` : ''}${avgText}`,
+            name: `${name}${codes.length > 0 ? `(${codes.length})` : ''}${avgText}${riskSuffix}`,
           }),
           undefined,
           true
@@ -195,6 +197,31 @@ export class StockProvider implements TreeDataProvider<LeekTreeItem> {
       );
     });
     return nodes;
+  }
+
+  /** 分组破位标记：组内警告计数，SELL_NOW 优先于 OBSERVE */
+  private getGroupRiskSuffix(codes: Array<string>): string {
+    let sells = 0;
+    let observes = 0;
+    codes.forEach((code) => {
+      const risk = globalState.breakRiskOutcomes?.[code];
+      if (risk && risk.decision === 'SELL_NOW') {
+        sells += 1;
+      } else if (risk && risk.decision === 'OBSERVE') {
+        observes += 1;
+      }
+    });
+    if (!sells && !observes) {
+      return '';
+    }
+    const parts: Array<string> = [];
+    if (sells) {
+      parts.push(`🔴SELL${sells > 1 ? `×${sells}` : ''}`);
+    }
+    if (observes) {
+      parts.push(`🟡观察${observes > 1 ? `×${observes}` : ''}`);
+    }
+    return ` ${parts.join(' ')}`;
   }
   getStockGroupNodes(groupId: string): Promise<LeekTreeItem[]> {
     const index: number = parseInt((groupId || '').replace('stockGroup_', ''));
