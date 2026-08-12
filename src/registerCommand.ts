@@ -71,6 +71,23 @@ export function registerViewEvent(
   const binanceService = new BinanceService(context);
 
   context.subscriptions.push(
+    commands.registerCommand('leek-fund.breakRiskCheck', async () => {
+      const { checkBreakRiskAll } = await import('./service/breakRiskService');
+      const outcomes = await checkBreakRiskAll(stockService);
+      if (!outcomes.length) {
+        window.showInformationMessage('【破位风控】暂无自选股数据，无法检查');
+        return;
+      }
+      const iconOf = (decision: string) =>
+        decision === 'SELL_NOW' ? '🔴' : decision === 'OBSERVE' ? '🟡' : '🟢';
+      const lines = outcomes.map(
+        (o) => `${iconOf(o.decision)} ${o.name} ${o.decision}：${o.reason}`
+      );
+      window.showInformationMessage(`【破位风控检查】\n${lines.join('\n')}`);
+    })
+  );
+
+  context.subscriptions.push(
     commands.registerCommand('leek-fund.toggleFlashNews', () => {
       const isEnable = LeekFundConfig.getConfig('leek-fund.flash-news');
       LeekFundConfig.setConfig('leek-fund.flash-news', !isEnable).then(() => {

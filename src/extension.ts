@@ -31,6 +31,7 @@ import { cacheFundAmountData, updateAmount } from './webview/setAmount';
 import { cacheStockPriceData, updateStockPrice } from './webview/setStockPrice';
 import { startProxyServer } from './webview/proxyService/proxyService';
 import createEastMoneyDataServer from './service/eastmoney';
+import { checkBreakRiskAll, notifyBreakOutcomes } from './service/breakRiskService';
 
 let loopTimer: NodeJS.Timeout | null = null;
 let binanceLoopTimer: NodeJS.Timeout | null = null;
@@ -39,6 +40,8 @@ let fundTreeView: TreeView<any> | null = null;
 let stockTreeView: TreeView<any> | null = null;
 let forexTreeView: TreeView<any> | null = null;
 let binanceTreeView: TreeView<any> | null = null;
+/** 破位风控尾盘检查：记录已检查的日期（每天 14:55 一次） */
+let breakCheckedDate = '';
 
 let flashNewsOutputServer: FlashNewsOutputServer | null = null;
 let profitBar: ProfitStatusBar | null = null;
@@ -146,6 +149,16 @@ export async function activate(context: ExtensionContext) {
         // statusBar.refresh();
       } else {
         manualRequest();
+      }
+
+      // 尾盘 14:55~15:00 自动执行破位风控检查（每个交易日一次）
+      const now = new Date();
+      const pad = (n: number) => (n < 10 ? `0${n}` : String(n));
+      const todayKey = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+      const hhmm = now.getHours() * 60 + now.getMinutes();
+      if (breakCheckedDate !== todayKey && hhmm >= 14 * 60 + 55 && hhmm < 15 * 60) {
+        breakCheckedDate = todayKey;
+        checkBreakRiskAll(stockService).then(notifyBreakOutcomes);
       }
     } else {
       Log.info('StockMarket Closed! Polling closed!');

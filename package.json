@@ -86,6 +86,11 @@
     },
     "commands": [
       {
+        "command": "leek-fund.breakRiskCheck",
+        "title": "破位风控检查",
+        "icon": "$(shield)"
+      },
+      {
         "command": "leek-fund.openAiConfig",
         "title": "Leek: 打开 AI 配置管理",
         "icon": "$(gear)"
@@ -928,6 +933,11 @@
             "1周"
           ],
           "description": "个股 AI 分析所用的前复权日线历史区间（A 股：搜狐；港股：腾讯）"
+        },
+        "leek-fund.breakWatch": {
+          "type": "array",
+          "default": [],
+          "description": "破位风控观察期状态（由尾盘检查自动维护，请勿手改）"
         }
       }
     },
