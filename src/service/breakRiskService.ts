@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { window } from 'vscode';
 import StockService from '../explorer/stockService';
 import { LeekTreeItem } from '../shared/leekTreeItem';
 import { LeekFundConfig } from '../shared/leekConfig';
@@ -102,6 +101,11 @@ export interface BreakCheckOutcome {
   isWatchStart: boolean; // 本次是否新触发观察期
 }
 
+export interface BreakCheckResult {
+  outcomes: Array<BreakCheckOutcome>;
+  checkedAt: string; // 检查时间 HH:mm
+}
+
 /** 对单只自选股执行破位风控检查（含观察期记忆推进） */
 export async function checkBreakRiskForStock(
   item: LeekTreeItem,
@@ -169,7 +173,7 @@ export async function checkBreakRiskForStock(
 }
 
 /** 对全部自选股执行检查，返回结果 */
-export async function checkBreakRiskAll(stockService: StockService): Promise<Array<BreakCheckOutcome>> {
+export async function checkBreakRiskAll(stockService: StockService): Promise<BreakCheckResult> {
   const outcomes: Array<BreakCheckOutcome> = [];
   const codes = stockService.stockList.map((item) => item.info.code);
   // 预拉全部日线（一次性批量请求）
@@ -187,23 +191,7 @@ export async function checkBreakRiskAll(stockService: StockService): Promise<Arr
       }
     })
   );
-  return outcomes;
-}
-
-/** 尾盘自动检查：只对 SELL_NOW / OBSERVE 弹通知，全部 HOLD 时静默 */
-export function notifyBreakOutcomes(outcomes: Array<BreakCheckOutcome>) {
-  const sells = outcomes.filter((o) => o.decision === 'SELL_NOW');
-  const observes = outcomes.filter((o) => o.decision === 'OBSERVE');
-  if (sells.length) {
-    const lines = sells.map(
-      (o) => `🔴 ${o.name}：${o.reason}`
-    );
-    window.showWarningMessage(`【破位风控】${lines.join('\n')}`, { modal: false });
-  }
-  if (observes.length) {
-    const lines = observes.map(
-      (o) => `🟡 ${o.name}：${o.reason}`
-    );
-    window.showInformationMessage(`【破位风控-观察期】${lines.join('\n')}`, { modal: false });
-  }
+  const d = new Date();
+  const pad = (n: number) => (n < 10 ? `0${n}` : String(n));
+  return { outcomes, checkedAt: `${pad(d.getHours())}:${pad(d.getMinutes())}` };
 }

@@ -22,6 +22,7 @@ function getDefaultSettingsPath(filename: string = 'leek-fund.settings.json'): s
 import fundCodeList from './data/fundcodeSearch';
 import { BinanceProvider } from './explorer/binanceProvider';
 import BinanceService from './explorer/binanceService';
+import { BreakRiskProvider } from './explorer/breakRiskProvider';
 import { ForexProvider } from './explorer/forexProvider';
 import { FundProvider } from './explorer/fundProvider';
 import FundService from './explorer/fundService';
@@ -65,7 +66,8 @@ export function registerViewEvent(
   newsProvider: NewsProvider,
   flashNewsOutputServer: FlashNewsOutputServer,
   binanceProvider: BinanceProvider,
-  forexProvider: ForexProvider
+  forexProvider: ForexProvider,
+  breakRiskProvider: BreakRiskProvider
 ) {
   const newsService = new NewsService();
   const binanceService = new BinanceService(context);
@@ -73,17 +75,13 @@ export function registerViewEvent(
   context.subscriptions.push(
     commands.registerCommand('leek-fund.breakRiskCheck', async () => {
       const { checkBreakRiskAll } = await import('./service/breakRiskService');
-      const outcomes = await checkBreakRiskAll(stockService);
-      if (!outcomes.length) {
-        window.showInformationMessage('【破位风控】暂无自选股数据，无法检查');
-        return;
-      }
-      const iconOf = (decision: string) =>
-        decision === 'SELL_NOW' ? '🔴' : decision === 'OBSERVE' ? '🟡' : '🟢';
-      const lines = outcomes.map(
-        (o) => `${iconOf(o.decision)} ${o.name} ${o.decision}：${o.reason}`
+      const result = await checkBreakRiskAll(stockService);
+      breakRiskProvider?.setOutcomes(result.outcomes, result.checkedAt);
+      commands.executeCommand('workbench.view.extension.leekFundMenu');
+      window.setStatusBarMessage(
+        `破位风控检查完成：${result.outcomes.length} 只，见侧边栏「破位风控」视图`,
+        5000
       );
-      window.showInformationMessage(`【破位风控检查】\n${lines.join('\n')}`);
     })
   );
 
