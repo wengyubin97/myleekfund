@@ -27,7 +27,7 @@ const SIGNAL_UP_RED = '#E53935';
 const SIGNAL_DOWN_GREEN = '#00B050';
 /** 闪烁间隙/无数据时的灰色 */
 const BAR_GRAY = '#A0A0A0';
-/** 快速涨跌提示阈值（%/分钟）：5 秒轮询约 0.04%/5s */
+/** 快速涨跌提示阈值（%/分钟）：10 秒采样约 0.08%/10s */
 const SURGE_FAST_THRESHOLD = 0.5;
 
 export class StatusBar {
@@ -40,7 +40,7 @@ export class StatusBar {
   /** 快速涨跌提示条：状态栏最左第一位置（轮动），无信号时隐藏 */
   private surgeUpBarItem: StatusBarItem;
   private surgeDownBarItem: StatusBarItem;
-  /** 上次轮询价缓存（用于 5 秒轮询涨跌速判定） */
+  /** 上次 10 秒采样基准价缓存（涨跌速判定用） */
   private surgePriceCache: Map<string, { price: number; time: number }> = new Map();
   constructor(stockService: StockService, fundService: FundService) {
     this.stockService = stockService;
@@ -371,8 +371,8 @@ export class StatusBar {
 
   /**
    * 快速涨跌提示：状态栏最左，涨速条与跌速条常驻（无信号时显示 1min 榜）。
-   * 涨速条候选优先级：涨停 → 5s 涨速达标 → 1min 涨幅最大；
-   * 跌速条对称。显示同时带 5s 涨速与 1min 涨跌幅。
+   * 涨速条候选优先级：涨停 → 10s 涨速达标 → 1min 涨幅最大；
+   * 跌速条对称。显示同时带 10s 涨速与 1min 涨跌幅。
    */
   async refreshSurgeStatusBar() {
     if (this.hideStatusBar || this.hideStatusBarStock) {
@@ -390,29 +390,34 @@ export class StatusBar {
         if (isNaN(curPrice) || curPrice <= 0) {
           return null;
         }
-        let speed5s = 0;
+        // 10 秒涨速：基准价每约 10 秒更新一次，涨速 = 10 秒涨跌归一化到 %/分钟
+        let speed10s = 0;
         const last = this.surgePriceCache.get(code);
-        this.surgePriceCache.set(code, { price: curPrice, time: now });
         if (last) {
           const elapsedSec = (now - last.time) / 1000;
-          // 间隔不合理（闭市轮询拉长/长时间暂停）不判定
-          if (elapsedSec >= 1 && elapsedSec <= 60) {
+          if (elapsedSec >= 8 && elapsedSec <= 60) {
             const diffPct = (curPrice / last.price - 1) * 100;
-            speed5s = diffPct * (60 / elapsedSec);
+            speed10s = diffPct * (60 / elapsedSec);
           }
+          if (elapsedSec >= 8) {
+            // 达到采样间隔，更新基准
+            this.surgePriceCache.set(code, { price: curPrice, time: now });
+          }
+        } else {
+          this.surgePriceCache.set(code, { price: curPrice, time: now });
         }
         let gain1m: number | null = null;
         try {
           gain1m = await getStockGain1m(code);
         } catch (err) {
-          // 分钟线异常不影响 5s 涨速
+          // 分钟线异常不影响 10s 涨速
         }
         const percent = parseFloat(item.info.percent || '');
         return {
           code,
           name: item.info.name || code,
           percent: isNaN(percent) ? 0 : percent,
-          speed5s,
+          speed10s,
           gain1m,
           limit: this.getLimitState(code, item.info.name || '', percent),
         };
@@ -422,7 +427,7 @@ export class StatusBar {
       code: string;
       name: string;
       percent: number;
-      speed5s: number;
+      speed10s: number;
       gain1m: number | null;
       limit: 'up' | 'down' | null;
     }>;
@@ -435,22 +440,22 @@ export class StatusBar {
       }
     });
 
-    const sortBySpeed = (a: typeof valid[0], b: typeof valid[0]) => b.speed5s - a.speed5s;
+    const sortBySpeed = (a: typeof valid[0], b: typeof valid[0]) => b.speed10s - a.speed10s;
     const sortByGainAsc = (a: typeof valid[0], b: typeof valid[0]) =>
       (a.gain1m ?? 0) - (b.gain1m ?? 0);
     const sortByGainDesc = (a: typeof valid[0], b: typeof valid[0]) =>
       (b.gain1m ?? 0) - (a.gain1m ?? 0);
 
-    // 涨速条：涨停 > 5s 涨速达标 > 1min 涨幅最大
+    // 涨速条：涨停 > 10s 涨速达标 > 1min 涨幅最大
     const upLimit = valid.filter((m) => m.limit === 'up').sort((a, b) => b.percent - a.percent);
     const upFast = valid
-      .filter((m) => m.limit !== 'up' && m.speed5s >= SURGE_FAST_THRESHOLD)
+      .filter((m) => m.limit !== 'up' && m.speed10s >= SURGE_FAST_THRESHOLD)
       .sort(sortBySpeed);
     const upGain = valid.filter((m) => m.limit !== 'up').sort(sortByGainDesc);
-    // 跌速条：跌停 > 5s 跌速达标 > 1min 跌幅最大
+    // 跌速条：跌停 > 10s 跌速达标 > 1min 跌幅最大
     const downLimit = valid.filter((m) => m.limit === 'down').sort((a, b) => a.percent - b.percent);
     const downFast = valid
-      .filter((m) => m.limit !== 'down' && m.speed5s <= -SURGE_FAST_THRESHOLD)
+      .filter((m) => m.limit !== 'down' && m.speed10s <= -SURGE_FAST_THRESHOLD)
       .sort(sortBySpeed);
     const downGain = valid.filter((m) => m.limit !== 'down').sort(sortByGainAsc);
 
@@ -462,8 +467,8 @@ export class StatusBar {
       let text: string;
       if (hit.limit === 'up') {
         text = `${hit.name} 涨停`;
-      } else if (hit.speed5s >= SURGE_FAST_THRESHOLD) {
-        text = `${hit.name} +${Number(hit.speed5s.toFixed(1))}%${this.gain1mText(hit.gain1m)}`;
+      } else if (hit.speed10s >= SURGE_FAST_THRESHOLD) {
+        text = `${hit.name} +${Number(hit.speed10s.toFixed(1))}%${this.gain1mText(hit.gain1m)}`;
       } else {
         text = `${hit.name}${this.gain1mText(hit.gain1m)}`;
       }
@@ -485,8 +490,8 @@ export class StatusBar {
       let text: string;
       if (hit.limit === 'down') {
         text = `${hit.name} 跌停`;
-      } else if (hit.speed5s <= -SURGE_FAST_THRESHOLD) {
-        text = `${hit.name} ${Number(hit.speed5s.toFixed(1))}%${this.gain1mText(hit.gain1m)}`;
+      } else if (hit.speed10s <= -SURGE_FAST_THRESHOLD) {
+        text = `${hit.name} ${Number(hit.speed10s.toFixed(1))}%${this.gain1mText(hit.gain1m)}`;
       } else {
         text = `${hit.name}${this.gain1mText(hit.gain1m)}`;
       }
@@ -548,7 +553,7 @@ export class StatusBar {
       code: string;
       name: string;
       percent: number;
-      speed5s: number;
+      speed10s: number;
       gain1m: number | null;
       limit: 'up' | 'down' | null;
     },
@@ -558,7 +563,7 @@ export class StatusBar {
       const dataUri = await getStockChartDataUri(hit.code);
       const lines: Array<string> = [
         `${hit.name}（${hit.code}） ${hit.percent >= 0 ? '+' : ''}${hit.percent}%`,
-        `${direction}速 ${Math.abs(hit.speed5s).toFixed(2)}%/分钟  1min ${
+        `${direction}速 ${Math.abs(hit.speed10s).toFixed(2)}%/分钟  1min ${
           hit.gain1m === null ? '--' : `${hit.gain1m >= 0 ? '+' : ''}${hit.gain1m.toFixed(2)}%`
         }`,
       ];
