@@ -11,7 +11,6 @@ import {
   getLatestVolumeCompare,
   getMinuteRecords,
   getStockChartDataUri,
-  getStockGain1m,
   getStockSignal,
   isMinuteSupported,
   signalLabel,
@@ -406,19 +405,12 @@ export class StatusBar {
         } else {
           this.surgePriceCache.set(code, { price: curPrice, time: now });
         }
-        let gain1m: number | null = null;
-        try {
-          gain1m = await getStockGain1m(code);
-        } catch (err) {
-          // 分钟线异常不影响 10s 涨速
-        }
         const percent = parseFloat(item.info.percent || '');
         return {
           code,
           name: item.info.name || code,
           percent: isNaN(percent) ? 0 : percent,
           speed10s,
-          gain1m,
           limit: this.getLimitState(code, item.info.name || '', percent),
         };
       })
@@ -428,7 +420,6 @@ export class StatusBar {
       name: string;
       percent: number;
       speed10s: number;
-      gain1m: number | null;
       limit: 'up' | 'down' | null;
     }>;
 
@@ -441,36 +432,30 @@ export class StatusBar {
     });
 
     const sortBySpeed = (a: typeof valid[0], b: typeof valid[0]) => b.speed10s - a.speed10s;
-    const sortByGainAsc = (a: typeof valid[0], b: typeof valid[0]) =>
-      (a.gain1m ?? 0) - (b.gain1m ?? 0);
-    const sortByGainDesc = (a: typeof valid[0], b: typeof valid[0]) =>
-      (b.gain1m ?? 0) - (a.gain1m ?? 0);
 
-    // 涨速条：涨停 > 10s 涨速达标 > 1min 涨幅最大
+    // 涨速条：涨停 > 10s 涨速达标 > 10s 涨速最大（常驻兜底，值可能很小）
     const upLimit = valid.filter((m) => m.limit === 'up').sort((a, b) => b.percent - a.percent);
     const upFast = valid
       .filter((m) => m.limit !== 'up' && m.speed10s >= SURGE_FAST_THRESHOLD)
       .sort(sortBySpeed);
-    const upGain = valid.filter((m) => m.limit !== 'up').sort(sortByGainDesc);
-    // 跌速条：跌停 > 10s 跌速达标 > 1min 跌幅最大
+    const upSlow = valid.filter((m) => m.limit !== 'up' && m.speed10s > 0).sort(sortBySpeed);
+    // 跌速条：跌停 > 10s 跌速达标 > 10s 跌速最大（常驻兜底）
     const downLimit = valid.filter((m) => m.limit === 'down').sort((a, b) => a.percent - b.percent);
     const downFast = valid
       .filter((m) => m.limit !== 'down' && m.speed10s <= -SURGE_FAST_THRESHOLD)
       .sort(sortBySpeed);
-    const downGain = valid.filter((m) => m.limit !== 'down').sort(sortByGainAsc);
+    const downSlow = valid.filter((m) => m.limit !== 'down' && m.speed10s < 0).sort(sortBySpeed);
 
-    const upHit = upLimit[0] ?? upFast[0] ?? upGain[0];
-    const downHit = downLimit[0] ?? downFast[0] ?? downGain[0];
+    const upHit = upLimit[0] ?? upFast[0] ?? upSlow[0];
+    const downHit = downLimit[0] ?? downFast[0] ?? downSlow[0];
 
     if (upHit) {
       const hit = upHit;
       let text: string;
       if (hit.limit === 'up') {
-        text = `${hit.name} 涨停`;
-      } else if (hit.speed10s >= SURGE_FAST_THRESHOLD) {
-        text = `${hit.name} +${Number(hit.speed10s.toFixed(1))}%${this.gain1mText(hit.gain1m)}`;
+        text = `${this.shortenName(hit.name)} 涨停`;
       } else {
-        text = `${hit.name}${this.gain1mText(hit.gain1m)}`;
+        text = `${this.shortenName(hit.name)} +${Number(hit.speed10s.toFixed(1))}%`;
       }
       this.surgeUpBarItem.text = text;
       this.surgeUpBarItem.color = SIGNAL_UP_RED;
@@ -489,11 +474,9 @@ export class StatusBar {
       const hit = downHit;
       let text: string;
       if (hit.limit === 'down') {
-        text = `${hit.name} 跌停`;
-      } else if (hit.speed10s <= -SURGE_FAST_THRESHOLD) {
-        text = `${hit.name} ${Number(hit.speed10s.toFixed(1))}%${this.gain1mText(hit.gain1m)}`;
+        text = `${this.shortenName(hit.name)} 跌停`;
       } else {
-        text = `${hit.name}${this.gain1mText(hit.gain1m)}`;
+        text = `${this.shortenName(hit.name)} ${Number(hit.speed10s.toFixed(1))}%`;
       }
       this.surgeDownBarItem.text = text;
       this.surgeDownBarItem.color = SIGNAL_DOWN_GREEN;
@@ -509,12 +492,12 @@ export class StatusBar {
     }
   }
 
-  /** 1min 涨跌幅文本（带符号，无数据返回空串） */
-  private gain1mText(gain1m: number | null): string {
-    if (gain1m === null || isNaN(gain1m)) {
-      return '';
+  /** 状态栏名称长度控制：>4 字截前 4 字；≤2 字保持原样（无更长数据源可补全） */
+  private shortenName(name: string): string {
+    if (name.length > 4) {
+      return name.slice(0, 4);
     }
-    return ` ${gain1m >= 0 ? '+' : ''}${Number(gain1m.toFixed(1))}%`;
+    return name;
   }
 
   /** A股涨跌停判定（主板 10%、创业/科创 20%、北交所 30%、ST 5%）；港股/美股/期货无涨跌停 */
@@ -554,7 +537,6 @@ export class StatusBar {
       name: string;
       percent: number;
       speed10s: number;
-      gain1m: number | null;
       limit: 'up' | 'down' | null;
     },
     direction: '涨' | '跌'
@@ -563,9 +545,7 @@ export class StatusBar {
       const dataUri = await getStockChartDataUri(hit.code);
       const lines: Array<string> = [
         `${hit.name}（${hit.code}） ${hit.percent >= 0 ? '+' : ''}${hit.percent}%`,
-        `${direction}速 ${Math.abs(hit.speed10s).toFixed(2)}%/分钟  1min ${
-          hit.gain1m === null ? '--' : `${hit.gain1m >= 0 ? '+' : ''}${hit.gain1m.toFixed(2)}%`
-        }`,
+        `${direction}速 ${Math.abs(hit.speed10s).toFixed(2)}%/分钟`,
       ];
       if (dataUri) {
         lines.push('', `![分时图](${dataUri})`);
