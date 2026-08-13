@@ -433,22 +433,22 @@ export class StatusBar {
 
     const sortBySpeed = (a: typeof valid[0], b: typeof valid[0]) => b.speed10s - a.speed10s;
 
-    // 涨速条：涨停（仅封板瞬间/仍有买盘冲击时）> 10s 涨速达标 > 10s 涨速最大（常驻兜底）
+    // 涨速条：涨停（仅封板瞬间/仍有买盘冲击时）> 10s 涨速达标 > 10s 涨速最大（恒常显示）
     const upLimit = valid
       .filter((m) => m.limit === 'up' && m.speed10s > 0)
       .sort((a, b) => b.percent - a.percent);
     const upFast = valid
       .filter((m) => m.limit !== 'up' && m.speed10s >= SURGE_FAST_THRESHOLD)
       .sort(sortBySpeed);
-    const upSlow = valid.filter((m) => m.limit !== 'up' && m.speed10s > 0).sort(sortBySpeed);
-    // 跌速条：跌停（仅封板瞬间/仍有抛压时）> 10s 跌速达标 > 10s 跌速最大（常驻兜底）
+    const upSlow = valid.filter((m) => m.limit !== 'up').sort(sortBySpeed);
+    // 跌速条：跌停（仅封板瞬间/仍有抛压时）> 10s 跌速达标 > 10s 跌速最大（恒常显示）
     const downLimit = valid
       .filter((m) => m.limit === 'down' && m.speed10s < 0)
       .sort((a, b) => a.percent - b.percent);
     const downFast = valid
       .filter((m) => m.limit !== 'down' && m.speed10s <= -SURGE_FAST_THRESHOLD)
       .sort(sortBySpeed);
-    const downSlow = valid.filter((m) => m.limit !== 'down' && m.speed10s < 0).sort(sortBySpeed);
+    const downSlow = valid.filter((m) => m.limit !== 'down').sort((a, b) => a.speed10s - b.speed10s);
 
     const upHit = upLimit[0] ?? upFast[0] ?? upSlow[0];
     const downHit = downLimit[0] ?? downFast[0] ?? downSlow[0];
