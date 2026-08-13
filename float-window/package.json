@@ -1,0 +1,17 @@
+{
+  "name": "leek-fund-float",
+  "version": "0.1.0",
+  "private": true,
+  "description": "韭菜盒子桌面悬浮窗：A股/港股实时行情、涨跌速榜、分组",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "axios": "^0.19.2",
+    "iconv-lite": "^0.6.2"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  }
+}

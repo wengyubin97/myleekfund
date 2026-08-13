@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>LeekFund Float</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
+    html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; }
+    body {
+      font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+      font-size: 12px;
+      color: #e8e8e8;
+    }
+    #panel {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background: rgba(16, 16, 20, 0.82);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    #titlebar {
+      -webkit-app-region: drag;
+      height: 26px;
+      flex: none;
+      display: flex;
+      align-items: center;
+      padding: 0 6px 0 10px;
+      font-size: 11px;
+      color: #9a9a9a;
+      cursor: move;
+    }
+    #titlebar .btns { margin-left: auto; -webkit-app-region: no-drag; display: flex; }
+    #titlebar button {
+      border: none;
+      background: transparent;
+      color: #9a9a9a;
+      font-size: 12px;
+      width: 22px;
+      height: 22px;
+      cursor: pointer;
+      border-radius: 4px;
+      line-height: 1;
+    }
+    #titlebar button:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+    #speedbar { flex: none; padding: 2px 8px 4px 8px; }
+    .speed-row {
+      display: flex;
+      align-items: center;
+      padding: 2px 4px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 1px;
+      white-space: nowrap;
+    }
+    .speed-row .name { flex: none; max-width: 72px; overflow: hidden; text-overflow: ellipsis; }
+    .speed-row .val { margin-left: auto; }
+    .speed-up { background: rgba(229, 57, 53, 0.16); color: #ff8a87; }
+    .speed-down { background: rgba(0, 176, 80, 0.16); color: #7fd6a4; }
+    #list { flex: 1; overflow-y: auto; padding: 0 8px 8px 8px; }
+    #list::-webkit-scrollbar { width: 4px; }
+    #list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+    .group-row {
+      padding: 3px 4px;
+      font-size: 11px;
+      color: #b8b8b8;
+      display: flex;
+      align-items: center;
+      margin-top: 2px;
+      white-space: nowrap;
+    }
+    .group-row .gname { font-weight: 600; }
+    .group-row .gavg { margin-left: auto; }
+    .stock-row {
+      display: flex;
+      align-items: center;
+      padding: 2px 4px;
+      border-radius: 3px;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .stock-row:hover { background: rgba(255, 255, 255, 0.06); }
+    .stock-row .sname { flex: none; max-width: 78px; overflow: hidden; text-overflow: ellipsis; }
+    .stock-row .sprice { flex: none; width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
+    .stock-row .spct { flex: none; width: 58px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .up { color: #ff8a87; }
+    .down { color: #7fd6a4; }
+    .flat { color: #c8c8c8; }
+    .risk { color: #ffd166; font-weight: 600; }
+    #footer {
+      flex: none;
+      height: 18px;
+      font-size: 10px;
+      color: #6a6a6a;
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+    }
+    #footer .hint { margin-left: auto; }
+  </style>
+</head>
+<body>
+  <div id="panel">
+    <div id="titlebar">
+      <span>🥬 韭菜悬浮窗</span>
+      <span class="btns">
+        <button id="btnMin" title="最小化">—</button>
+        <button id="btnClose" title="退出">✕</button>
+      </span>
+    </div>
+    <div id="speedbar">
+      <div class="speed-row speed-up"><span class="name" id="upName">--</span><span class="val" id="upVal">+0%</span></div>
+      <div class="speed-row speed-down"><span class="name" id="downName">--</span><span class="val" id="downVal">-0%</span></div>
+    </div>
+    <div id="list"></div>
+    <div id="footer">
+      <span id="updated">--</span>
+      <span class="hint">滚轮调透明度 · 右键菜单</span>
+    </div>
+  </div>
+  <script src="renderer.js"></script>
+</body>
+</html>
