@@ -3,6 +3,7 @@
 ## Where things live
 
 - The workspace root (`myleekfund`) is NOT the project. The VSCode extension lives in **`leek-fund/`** — that is also where the git repo is. Run all commands from `C:\wyb\project\myleekfund\leek-fund`.
+- **`leek-fund/float-window/`** is a separate Electron desktop floating window (韭菜悬浮窗): transparent, always-on-top, dragable stock ticker reading the same `leek-fund.stocks` from the VSCode user settings. Run `npm start` inside it; it has its own `node_modules` (gitignored) and is excluded from the vsix (`.vscodeignore`).
 
 ## What this is
 
