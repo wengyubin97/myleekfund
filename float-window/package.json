@@ -2,16 +2,40 @@
   "name": "leek-fund-float",
   "version": "0.1.0",
   "private": true,
-  "description": "韭菜盒子桌面悬浮窗：A股/港股实时行情、涨跌速榜、分组",
+  "description": "韭菜盒子桌面悬浮窗：A股/港股实时行情、分组、分时图/K线",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "pack": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.wengyubin.leekfundfloat",
+    "productName": "韭菜悬浮窗",
+    "files": [
+      "main.js",
+      "renderer.js",
+      "index.html"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "artifactName": "leek-float-${version}.exe"
+    }
   },
   "dependencies": {
     "axios": "^0.19.2",
     "iconv-lite": "^0.6.2"
   },
   "devDependencies": {
-    "electron": "^31.0.0"
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
   }
 }
