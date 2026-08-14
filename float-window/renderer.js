@@ -38,6 +38,7 @@ function loadUIState() {
     const s = JSON.parse(localStorage.getItem('leekFloatUi') || '{}');
     return {
       collapsed: s.collapsed || {},
+      pinned: s.pinned || [],
       groupSort: !!s.groupSort,
       stockSort: !!s.stockSort,
     };
@@ -114,10 +115,9 @@ function render(quotes) {
   }));
   groups = groups.filter((g) => g.members.length);
   groups.forEach((g) => g.members.forEach((m) => grouped.add(m.code)));
-  // 「置顶分组」恒在首位（不受分组排序影响）
-  const PINNED_GROUP_NAME = '置顶分组';
-  const pinned = groups.filter((g) => g.name === PINNED_GROUP_NAME);
-  const nonPinned = groups.filter((g) => g.name !== PINNED_GROUP_NAME);
+  // 置顶分组恒在首位（按置顶顺序），其余分组可排序
+  const pinned = groups.filter((g) => uiState.pinned.includes(g.name));
+  const nonPinned = groups.filter((g) => !uiState.pinned.includes(g.name));
   if (uiState.groupSort) {
     const avgOf = (g) => g.members.reduce((s, m) => s + m.percent, 0) / g.members.length;
     nonPinned.sort((a, b) => avgOf(b) - avgOf(a));
@@ -130,7 +130,7 @@ function render(quotes) {
   groups.forEach((g, i) => {
     const avg = g.members.reduce((s, m) => s + m.percent, 0) / g.members.length;
     const collapsed = !!uiState.collapsed[g.name];
-    html += `<div class="group-row group-header" data-idx="${i}" data-name="${g.name}"><span class="gmarker">${collapsed ? '▸' : '▾'}</span><span class="gname">${g.name}(${g.members.length})</span><span class="gavg ${clsOf(avg)}">${sign(avg)}${avg.toFixed(2)}%</span><span class="del" title="删除分组">×</span></div>`;
+    html += `<div class="group-row group-header" data-idx="${i}" data-name="${g.name}"><span class="gmarker">${collapsed ? '▸' : '▾'}</span><span class="gname">${g.name}(${g.members.length})</span><span class="gavg ${clsOf(avg)}">${sign(avg)}${avg.toFixed(2)}%</span><span class="pin ${uiState.pinned.includes(g.name) ? 'pinned' : ''}" title="置顶/取消置顶">📌</span><span class="del" title="删除分组">×</span></div>`;
     if (!collapsed) {
       html += g.members
         .map(
@@ -184,12 +184,25 @@ async function tick() {
 document.getElementById('btnClose').addEventListener('click', () => ipcRenderer.send('win-close'));
 document.getElementById('btnMin').addEventListener('click', () => ipcRenderer.send('win-hide'));
 
-// 列表点击：组内「添加股票到此分组」/ × 删除（确认条）/ 分组标题折叠
+// 列表点击：组内「添加股票到此分组」/ 置顶 / × 删除（确认条）/ 分组标题折叠
 document.getElementById('list').addEventListener('click', (e) => {
   const addRow = e.target.closest('.add-stock-row');
   if (addRow) {
     const name = addRow.dataset.name;
     if (name) openAddPanel('addToGroup', `搜索添加到「${name}」`, name);
+    return;
+  }
+  const pinBtn = e.target.closest('.pin');
+  if (pinBtn) {
+    const groupRow = pinBtn.closest('.group-header');
+    if (groupRow && groupRow.dataset.name) {
+      const name = groupRow.dataset.name;
+      const i = uiState.pinned.indexOf(name);
+      if (i >= 0) uiState.pinned.splice(i, 1);
+      else uiState.pinned.push(name);
+      saveUIState();
+      if (lastQuotes) render(lastQuotes);
+    }
     return;
   }
   const del = e.target.closest('.del');
