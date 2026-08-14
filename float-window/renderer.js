@@ -114,10 +114,15 @@ function render(quotes) {
   }));
   groups = groups.filter((g) => g.members.length);
   groups.forEach((g) => g.members.forEach((m) => grouped.add(m.code)));
+  // 「置顶分组」恒在首位（不受分组排序影响）
+  const PINNED_GROUP_NAME = '置顶分组';
+  const pinned = groups.filter((g) => g.name === PINNED_GROUP_NAME);
+  const nonPinned = groups.filter((g) => g.name !== PINNED_GROUP_NAME);
   if (uiState.groupSort) {
     const avgOf = (g) => g.members.reduce((s, m) => s + m.percent, 0) / g.members.length;
-    groups.sort((a, b) => avgOf(b) - avgOf(a));
+    nonPinned.sort((a, b) => avgOf(b) - avgOf(a));
   }
+  groups = [...pinned, ...nonPinned];
   if (uiState.stockSort) {
     groups.forEach((g) => g.members.sort((a, b) => b.percent - a.percent));
   }
@@ -350,7 +355,12 @@ const ALLOWED_MARKETS = new Set(['sh', 'sz', 'bj', 'hk']);
 async function searchStocks(keyword) {
   const resp = await axios.get(SEARCH_URL, { params: { q: keyword }, timeout: 5000 });
   return (resp.data && resp.data.data && resp.data.data.stock || [])
-    .map((a) => ({ code: String(a[1]).toLowerCase(), name: a[2], market: String(a[0]).toLowerCase() }))
+    .map((a) => ({
+      // smartbox 的 a[1] 是裸代码（如 601288），必须拼上市场前缀（如 sh601288）才能用于行情接口
+      code: String(a[0]).toLowerCase() + String(a[1]).toLowerCase(),
+      name: a[2],
+      market: String(a[0]).toLowerCase(),
+    }))
     .filter((s) => ALLOWED_MARKETS.has(s.market));
 }
 
@@ -362,7 +372,7 @@ function renderSearchResults(items) {
   addResults.innerHTML = items
     .map(
       (s) =>
-        `<div class="add-result" data-code="${s.code}"><span>${s.name}</span><span class="rcode">${s.market}${s.code.replace(/^(sh|sz|bj|hk)/, '')}</span></div>`
+        `<div class="add-result" data-code="${s.code}"><span>${s.name}</span><span class="rcode">${s.code}</span></div>`
     )
     .join('');
 }
