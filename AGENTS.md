@@ -3,7 +3,7 @@
 ## Where things live
 
 - The workspace root (`myleekfund`) is NOT the project. The VSCode extension lives in **`leek-fund/`** — that is also where the git repo is. Run all commands from `C:\wyb\project\myleekfund\leek-fund`.
-- **`leek-fund/float-window/`** is a separate Electron desktop floating window (韭菜悬浮窗): transparent, always-on-top, dragable stock ticker reading the same `leek-fund.stocks` from the VSCode user settings. Run `npm start` inside it; it has its own `node_modules` (gitignored) and is excluded from the vsix (`.vscodeignore`).
+- **`leek-fund/float-window/`** is a separate Electron desktop floating window (韭菜悬浮窗): transparent, always-on-top, dragable stock ticker reading the same `leek-fund.stocks`/`leek-fund.stockGroups` from the VSCode user settings. `npm install` once, then `npm start` inside it; it has its own `node_modules` (gitignored) and is excluded from the vsix (`.vscodeignore`).
 
 ## What this is
 
@@ -12,7 +12,7 @@ Personal fork (`wengyubin97/myleekfund`) of the leek-fund VSCode extension (韭�
 ## Custom features to keep intact
 
 - **状态栏**：个股紧凑格式 `名称 价格 涨跌幅`（整条涨跌色；快速拉升/下杀时信号色红/绿，静态不闪烁——`setBarFlash`）；分组按平均涨幅排序。急涨急跌（surge 涨速条）已移除，不要再加回。
-- **破位风控**：每个交易日 14:55~15:00 自动检查全部自选股（`src/service/breakRiskService.ts` + 纯判定 `src/shared/breakRisk.ts`）。数据：腾讯 `fqkline` 日线算 MA5/AVG_VOL_5（30s 缓存）+ 实时行情当日开/收/低/量。判定按用户 SOP：收盘<MA5 时 量比/实体/偏离 超标 → SELL_NOW，均未超 → OBSERVE 三天观察期（止损底线=触发日最低价）。结果写入 `globalState.breakRiskOutcomes`，Stock 视图个股行尾追加 `🔴SELL`/`🟡观察N`，分组行追加计数（`stockProvider.getGroupRiskSuffix`）。观察期持久化在配置 `leek-fund.breakWatch`（勿手改）。手动命令 `leek-fund.breakRiskCheck`。
+- **破位风控**：每个交易日 14:55~15:00 自动检查全部自选股（调度在 `src/extension.ts`，实现 `src/service/breakRiskService.ts` + 纯判定 `src/shared/breakRisk.ts`）。数据：腾讯 `fqkline` 日线算 MA5/AVG_VOL_5（30s 缓存）+ 实时行情当日开/收/低/量。判定按用户 SOP：收盘<MA5 时 量比/实体/偏离 超标 → SELL_NOW，均未超 → OBSERVE 三天观察期（止损底线=触发日最低价）。结果写入 `globalState.breakRiskOutcomes`，Stock 视图个股行尾追加 `🔴SELL`/`🟡观察N`，分组行追加计数（`stockProvider.getGroupRiskSuffix`）。观察期持久化在配置 `leek-fund.breakWatch`（勿手改）。手动命令 `leek-fund.breakRiskCheck`。
 - **分组**：侧边栏分组按平均涨跌幅降序；分组内常驻「➕ 添加股票到此分组」行（`contextValue: stockGroupAdd`，需在右键菜单 when 里排除）；标题栏「收起全部分组」用 VSCode 生成的 `workbench.actions.treeView.leekFundView.stock.collapseAll` 命令，不能用 provider 返回 Collapsed + refresh（VSCode 会记住展开状态）。
 - **tooltip**：个股/分组悬停显示自渲染分时图 PNG（`groupChart.ts` 最小 PNG 编码器 + data URI，纯 markdown 不依赖 HTML；`MarkdownString.supportHtml` 颜色方案已回退废弃，勿复用）。
 
@@ -31,11 +31,14 @@ code --install-extension ./leek-fund-3.24.0.vsix --force # 安装到 VSCode
 
 Gotchas:
 - `yarn` is a global npm install not on the default PATH — use `./node_modules/.bin/vsce package --yarn`, never bare `yarn`.
-- No lint gate: `./node_modules/.bin/tsc -p ./` compiling clean is the bar. (CI runs `yarn pretest` = lint + compile on node 16.19.0.)
-- `out/` is tracked but never committed; it's stale build output. Recompile after edits and verify new logic landed in `out/` (e.g. grep).
+- No lint gate: `./node_modules/.bin/tsc -p ./` compiling clean is the bar. husky hooks are NOT installed (`.git/hooks` empty), so `git commit` runs no lint either. (CI `.github/workflows/pr.yml` runs `yarn pretest` = lint + compile on node 16.19.0.)
+- `npm test` downloads VS Code via `@vscode/test-electron` (network-dependent); the user's workflow never runs it.
+- `out/` is gitignored (`.gitignore`) and untracked — stale build output until recompiled. Recompile after edits and verify new logic landed in `out/` (e.g. grep).
+- The packaged vsix **includes `node_modules`**: `.vscodeignore` deliberately keeps `# node_modules` commented — runtime deps (iconv-lite, axios, …) must ship in the package. Don't "slim" `.vscodeignore` by ignoring node_modules.
 - TypeScript strict, but `@types/vscode` is pinned to **1.59.0** — newer VSCode APIs (e.g. `MarkdownString.supportHtml`, `EventEmitter` fire args) need `as any` casts or `fire(undefined)`.
 - **Git 网络**：github.com 直连不通。已配置全局代理 `http.proxy`/`https.proxy = http://127.0.0.1:7890`（Clash），fetch/push 走代理即可。若新机器 clone 失败先检查此配置。
-- 验证安装版代码时用 `.claude/settings.json` 已授权的路径：`C:/Users/win10/.vscode/extensions/giscafer.leek-fund-3.24.0/out/...`。
+- 验证安装版代码时用用户级 `C:/Users/win10/.claude/settings.json` 的授权路径：`C:/Users/win10/.vscode/extensions/giscafer.leek-fund-3.24.0/out/...`（文件访问白名单，别去读白名单外的机器路径）。
+- Commit style: conventional commits（`feat:`/`fix:`/`docs:`/`revert:` + 中文描述，见 commitlint.config.js），照 `git log` 的写法即可。
 
 ## Conventions that differ from defaults
 

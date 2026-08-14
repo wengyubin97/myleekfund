@@ -55,7 +55,11 @@ async function fetchQuotes(codes) {
   const resp = await axios.get(QUOTE_URL, {
     responseType: 'arraybuffer',
     params: { q: codes.join(','), fmt: 'json' },
-    transformResponse: [(data) => JSON.parse(decode(data, 'GBK'))],
+    transformResponse: [(data) => {
+      // Electron 的 XHR adapter 返回 ArrayBuffer（无 .length），iconv-lite 解码前需转 Buffer
+      const buf = data instanceof ArrayBuffer ? Buffer.from(data) : data;
+      return JSON.parse(decode(buf, 'GBK'));
+    }],
     timeout: 8000,
     headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://gu.qq.com/' },
   });
