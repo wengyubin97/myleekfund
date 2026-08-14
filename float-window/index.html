@@ -49,6 +49,35 @@
     #titlebar button.active { color: #43a047; font-weight: 700; }
     #titlebar button.btntext { width: auto; padding: 0 5px; font-size: 11px; }
     #list { flex: 1; overflow-y: auto; padding: 0 8px 8px 8px; }
+    #chartView { flex: 1; display: none; flex-direction: column; min-height: 0; }
+    #chartView.show { display: flex; }
+    #chartHeader {
+      flex: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      font-size: 12px;
+      color: #e8e8e8;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    #chartHeader button {
+      border: none;
+      background: transparent;
+      color: #9a9a9a;
+      font-size: 12px;
+      height: 22px;
+      padding: 0 6px;
+      cursor: pointer;
+      border-radius: 4px;
+      line-height: 1;
+    }
+    #chartHeader button:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+    #chartTitle { color: #e8e8e8; white-space: nowrap; }
+    #chartLegend { margin-left: auto; font-size: 11px; color: #b8b8b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .chart-tabs { display: flex; flex: none; }
+    .chart-tabs .chart-tab.active { color: #43a047; font-weight: 700; }
+    #chartCanvas { flex: 1; width: 100%; min-height: 0; display: block; }
     #addPanel { flex: none; display: none; padding: 4px 8px; border-bottom: 1px solid rgba(255,255,255,0.08); }
     #addPanel input {
       width: 100%;
@@ -165,6 +194,20 @@
         <button id="btnMin" title="隐藏到托盘">—</button>
         <button id="btnClose" title="退出">✕</button>
       </span>
+    </div>
+    <div id="chartView">
+      <div id="chartHeader">
+        <button id="chartBack" title="返回列表">←</button>
+        <span id="chartTitle">--</span>
+        <span id="chartLegend"></span>
+        <span class="chart-tabs">
+          <button class="chart-tab active" data-mode="minute">分时</button>
+          <button class="chart-tab" data-mode="day">日K</button>
+          <button class="chart-tab" data-mode="week">周K</button>
+          <button class="chart-tab" data-mode="month">月K</button>
+        </span>
+      </div>
+      <canvas id="chartCanvas"></canvas>
     </div>
     <div id="addPanel">
       <input id="addInput" type="text" placeholder="输入股票名称/代码搜索" autocomplete="off" spellcheck="false" />

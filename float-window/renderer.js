@@ -219,6 +219,11 @@ document.getElementById('list').addEventListener('click', (e) => {
     }
     return;
   }
+  const stockRow = e.target.closest('.stock-row');
+  if (stockRow) {
+    openChart(stockRow.dataset.code, stockRow.dataset.name);
+    return;
+  }
   const row = e.target.closest('.group-header');
   if (!row) return;
   const idx = Number(row.dataset.idx);
@@ -253,7 +258,13 @@ document.getElementById('confirmYes').addEventListener('click', () => {
 });
 document.getElementById('confirmNo').addEventListener('click', hideConfirm);
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') hideConfirm();
+  if (e.key === 'Escape') {
+    if (chartCode) {
+      closeChart();
+    } else {
+      hideConfirm();
+    }
+  }
 });
 
 function deleteStock(code) {
@@ -472,6 +483,354 @@ addResults.addEventListener('click', (e) => {
 // ---- 标题栏按钮：添加股票 / 添加分组 ----
 document.getElementById('btnAddStock').addEventListener('click', () => openAddPanel('stock', '输入股票名称/代码搜索'));
 document.getElementById('btnAddGroup').addEventListener('click', () => openAddPanel('group', '输入分组名称，回车创建'));
+
+// ---- 图表视图（分时/日K/周K/月K） ----
+const chartView = document.getElementById('chartView');
+const chartCanvas = document.getElementById('chartCanvas');
+const chartTitleEl = document.getElementById('chartTitle');
+const chartLegendEl = document.getElementById('chartLegend');
+let chartCode = null;
+let chartName = '';
+let chartMode = 'minute';
+const chartCache = new Map(); // `${code}:${mode}` -> { time, data }
+
+const MINUTE_QUERY = 'https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=';
+const KLINE_QUERY = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=';
+const CHART_CACHE_TTL = 30000;
+const C_UP = '#ff8a87';
+const C_DOWN = '#7fd6a4';
+const C_AVG = '#f0c828';
+const C_GRID = 'rgba(255,255,255,0.10)';
+const C_TEXT = '#b8b8b8';
+const C_MA5 = '#ffd166';
+const C_MA10 = '#6fb1ff';
+const C_MA20 = '#c88fff';
+
+async function fetchChartData(code, mode) {
+  const key = `${code}:${mode}`;
+  const cached = chartCache.get(key);
+  if (cached && Date.now() - cached.time < CHART_CACHE_TTL) {
+    return cached.data;
+  }
+  let data = null;
+  if (mode === 'minute') {
+    const resp = await axios.get(MINUTE_QUERY + code, {
+      timeout: 8000,
+      headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://gu.qq.com/' },
+    });
+    const stock = resp.data && resp.data.data && resp.data.data[code];
+    const list = (stock && stock.data && stock.data.data) || [];
+    const qt = (stock && stock.qt && stock.qt[code]) || [];
+    const prevClose = parseFloat(qt[4]);
+    const points = [];
+    list.forEach((line) => {
+      const parts = String(line).split(/\s+/);
+      if (parts.length >= 2) {
+        const price = parseFloat(parts[1]);
+        if (!isNaN(price)) {
+          points.push({
+            time: parts[0],
+            price,
+            volume: parseFloat(parts[2]) || 0,
+            amount: parseFloat(parts[3]) || 0,
+          });
+        }
+      }
+    });
+    data = { prevClose, points };
+  } else {
+    const resp = await axios.get(`${KLINE_QUERY}${code},${mode},,,320,qfq`, {
+      timeout: 8000,
+      headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://gu.qq.com/' },
+    });
+    const stock = resp.data && resp.data.data && resp.data.data[code];
+    const rows = (stock && (stock[`qfq${mode}`] || stock[mode])) || [];
+    data = rows
+      .map((r) => ({
+        date: r[0],
+        open: parseFloat(r[1]),
+        close: parseFloat(r[2]),
+        high: parseFloat(r[3]),
+        low: parseFloat(r[4]),
+        volume: parseFloat(r[5]) || 0,
+      }))
+      .filter((k) => !isNaN(k.close) && k.close > 0);
+  }
+  chartCache.set(key, { time: Date.now(), data });
+  return data;
+}
+
+function setupCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = chartCanvas.getBoundingClientRect();
+  chartCanvas.width = Math.max(1, Math.round(rect.width * dpr));
+  chartCanvas.height = Math.max(1, Math.round(rect.height * dpr));
+  const ctx = chartCanvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  ctx.font = '10px "Microsoft YaHei", sans-serif';
+  return { ctx, w: rect.width, h: rect.height };
+}
+
+/** 分时均价线系数：腾讯分钟成交额/量为累计值，均价=累计额/累计量（A股量单位为手需除100） */
+function calcLotFactor(points) {
+  const last = points[points.length - 1];
+  if (!last || !last.volume || !last.amount) return 0;
+  const raw = last.amount / last.volume;
+  if (Math.abs(raw / last.price - 1) <= 0.3) return 1;
+  if (Math.abs(raw / 100 / last.price - 1) <= 0.3) return 100;
+  return 0;
+}
+
+function drawMinute(ctx, w, h, data) {
+  const { prevClose, points } = data;
+  const padL = 10;
+  const padR = 10;
+  const padT = 10;
+  const volH = Math.round(h * 0.18);
+  const chartH = h - padT - volH - 22;
+  const midY = padT + chartH / 2;
+  const pcts = points.map((p) => (p.price / prevClose - 1) * 100);
+  const maxAbs = Math.max(...pcts.map((v) => Math.abs(v)), 0.5);
+  const scale = chartH / 2 / maxAbs;
+  const toX = (i) => padL + (i / Math.max(points.length - 1, 1)) * (w - padL - padR);
+  const toY = (pct) => midY - pct * scale;
+
+  ctx.strokeStyle = C_GRID;
+  ctx.lineWidth = 1;
+  [midY, midY - chartH / 4, midY + chartH / 4].forEach((y) => {
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(w - padR, y);
+    ctx.stroke();
+  });
+
+  // 均价线（黄色）
+  const lotFactor = calcLotFactor(points);
+  if (lotFactor) {
+    ctx.strokeStyle = C_AVG;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    let started = false;
+    points.forEach((p, i) => {
+      if (!p.volume || !p.amount) return;
+      const avgPct = (p.amount / p.volume / lotFactor / prevClose - 1) * 100;
+      if (!started) {
+        ctx.moveTo(toX(i), toY(avgPct));
+        started = true;
+      } else {
+        ctx.lineTo(toX(i), toY(avgPct));
+      }
+    });
+    ctx.stroke();
+  }
+
+  // 价格折线（按段涨跌着色）
+  ctx.lineWidth = 1.4;
+  for (let i = 0; i < points.length - 1; i++) {
+    ctx.strokeStyle = pcts[i + 1] >= pcts[i] ? C_UP : C_DOWN;
+    ctx.beginPath();
+    ctx.moveTo(toX(i), toY(pcts[i]));
+    ctx.lineTo(toX(i + 1), toY(pcts[i + 1]));
+    ctx.stroke();
+  }
+  const lastPct = pcts[pcts.length - 1];
+  ctx.fillStyle = lastPct >= 0 ? C_UP : C_DOWN;
+  ctx.beginPath();
+  ctx.arc(toX(points.length - 1), toY(lastPct), 2.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 左侧标注 MAX/MIN/0
+  ctx.fillStyle = C_TEXT;
+  const maxPct = Math.max(...pcts);
+  const minPct = Math.min(...pcts);
+  ctx.fillText(`MAX ${maxPct >= 0 ? '+' : ''}${maxPct.toFixed(2)}%`, padL, Math.max(8, toY(maxPct) - 4));
+  ctx.fillText(`MIN ${minPct >= 0 ? '+' : ''}${minPct.toFixed(2)}%`, padL, Math.min(h - volH - 12, toY(minPct) + 10));
+  ctx.fillText('0', padL, Math.min(h - volH - 12, midY + 10));
+
+  // 分时量柱（差分，红涨绿跌）
+  const volBase = h - 18;
+  const vols = [];
+  let prev = 0;
+  points.forEach((p) => {
+    const v = p.volume - prev;
+    prev = p.volume;
+    vols.push(Math.max(v, 0));
+  });
+  const volMax = Math.max(...vols, 1);
+  points.forEach((p, i) => {
+    if (vols[i] <= 0) return;
+    const barH = Math.max(1, (vols[i] / volMax) * volH);
+    ctx.fillStyle = i === 0 ? (pcts[i] >= 0 ? C_UP : C_DOWN) : (pcts[i] >= pcts[i - 1] ? C_UP : C_DOWN);
+    ctx.globalAlpha = 0.75;
+    ctx.fillRect(toX(i) - 0.5, volBase - barH, 2, barH);
+    ctx.globalAlpha = 1;
+  });
+
+  // 时间轴：首/中/末
+  ctx.fillStyle = C_TEXT;
+  const mid = Math.floor(points.length / 2);
+  [0, mid, points.length - 1].forEach((i) => {
+    const t = points[i].time;
+    ctx.fillText(`${t.slice(0, 2)}:${t.slice(2, 4)}`, toX(i) - 12, h - 6);
+  });
+
+  chartLegendEl.textContent = `昨收 ${prevClose}  现价 ${points[points.length - 1].price.toFixed(2)}  ${lastPct >= 0 ? '+' : ''}${lastPct.toFixed(2)}%`;
+}
+
+function drawKline(ctx, w, h, bars, mode) {
+  const padL = 10;
+  const padR = 10;
+  const padT = 10;
+  const volH = Math.round(h * 0.16);
+  const chartH = h - padT - volH - 24;
+  const n = bars.length;
+  const bw = (w - padL - padR) / n;
+  const maxP = Math.max(...bars.map((b) => b.high));
+  const minP = Math.min(...bars.map((b) => b.low));
+  const toX = (i) => padL + (i + 0.5) * bw;
+  const toY = (p) => padT + (1 - (p - minP) / Math.max(maxP - minP, 1e-9)) * chartH;
+
+  ctx.strokeStyle = C_GRID;
+  ctx.lineWidth = 1;
+  for (let g = 0; g <= 4; g++) {
+    const y = padT + (g / 4) * chartH;
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(w - padR, y);
+    ctx.stroke();
+  }
+
+  // MA5/10/20
+  const ma = (len) =>
+    bars.map((_, i) => {
+      const s = bars.slice(Math.max(0, i - len + 1), i + 1);
+      return s.reduce((a, b) => a + b.close, 0) / s.length;
+    });
+  [[ma(5), C_MA5], [ma(10), C_MA10], [ma(20), C_MA20]].forEach(([line, color]) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    let started = false;
+    line.forEach((v, i) => {
+      if (!isNaN(v)) {
+        if (!started) {
+          ctx.moveTo(toX(i), toY(v));
+          started = true;
+        } else {
+          ctx.lineTo(toX(i), toY(v));
+        }
+      }
+    });
+    ctx.stroke();
+  });
+
+  // K线实体 + 影线
+  bars.forEach((b, i) => {
+    const x = toX(i);
+    const up = b.close >= b.open;
+    const color = up ? C_UP : C_DOWN;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, toY(b.high));
+    ctx.lineTo(x, toY(b.low));
+    ctx.stroke();
+    const yO = toY(b.open);
+    const yC = toY(b.close);
+    ctx.fillStyle = color;
+    ctx.fillRect(x - Math.max(bw * 0.32, 1), Math.min(yO, yC), Math.max(bw * 0.64, 2), Math.max(Math.abs(yC - yO), 1));
+  });
+
+  // 成交量（红涨绿跌）
+  const vMax = Math.max(...bars.map((b) => b.volume), 1);
+  const volBase = h - 18;
+  bars.forEach((b, i) => {
+    const barH = Math.max(1, (b.volume / vMax) * volH);
+    ctx.fillStyle = b.close >= b.open ? C_UP : C_DOWN;
+    ctx.globalAlpha = 0.7;
+    ctx.fillRect(toX(i) - Math.max(bw * 0.32, 1), volBase - barH, Math.max(bw * 0.64, 2), barH);
+    ctx.globalAlpha = 1;
+  });
+
+  // 时间轴：均匀取 5 个日期
+  ctx.fillStyle = C_TEXT;
+  [0, Math.floor(n / 4), Math.floor(n / 2), Math.floor((3 * n) / 4), n - 1].forEach((i) => {
+    ctx.fillText(bars[i].date.slice(2), toX(i) - 12, h - 6);
+  });
+
+  // 图例：最新一根 OHLC
+  const last = bars[n - 1];
+  const pct = (last.close / bars[n - 2].close - 1) * 100;
+  chartLegendEl.textContent = `开 ${last.open.toFixed(2)} 高 ${last.high.toFixed(2)} 低 ${last.low.toFixed(2)} 收 ${last.close.toFixed(2)}  ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+}
+
+async function drawChart() {
+  const code = chartCode;
+  const mode = chartMode;
+  if (!code) return;
+  let data;
+  try {
+    data = await fetchChartData(code, mode);
+  } catch (err) {
+    console.error('图表数据拉取失败：', err.message);
+    const { ctx, w } = setupCanvas();
+    ctx.fillStyle = C_TEXT;
+    ctx.fillText('数据拉取失败', 10, 20);
+    return;
+  }
+  if (chartCode !== code || chartMode !== mode) return;
+  const { ctx, w, h } = setupCanvas();
+  if (!data || (mode === 'minute' && (!data.points || !data.points.length)) || (mode !== 'minute' && !data.length)) {
+    ctx.fillStyle = C_TEXT;
+    ctx.fillText('暂无数据', 10, 20);
+    return;
+  }
+  if (mode === 'minute') {
+    drawMinute(ctx, w, h, data);
+  } else {
+    drawKline(ctx, w, h, data, mode);
+  }
+}
+
+function syncChartTabs() {
+  document.querySelectorAll('.chart-tab').forEach((t) => {
+    t.classList.toggle('active', t.dataset.mode === chartMode);
+  });
+}
+
+function openChart(code, name) {
+  chartCode = code;
+  chartName = name;
+  chartTitleEl.textContent = `${name} ${code}`;
+  chartMode = 'minute';
+  syncChartTabs();
+  document.getElementById('addPanel').style.display = 'none';
+  document.getElementById('confirmBar').style.display = 'none';
+  document.getElementById('list').style.display = 'none';
+  chartView.classList.add('show');
+  drawChart();
+}
+
+function closeChart() {
+  chartView.classList.remove('show');
+  document.getElementById('list').style.display = '';
+  chartCode = null;
+  if (lastQuotes) render(lastQuotes);
+}
+
+document.getElementById('chartBack').addEventListener('click', closeChart);
+document.querySelectorAll('.chart-tab').forEach((t) => {
+  t.addEventListener('click', () => {
+    if (!chartCode) return;
+    chartMode = t.dataset.mode;
+    syncChartTabs();
+    drawChart();
+  });
+});
+window.addEventListener('resize', () => {
+  if (chartCode) drawChart();
+});
 
 tick();
 setInterval(tick, POLL_INTERVAL);
