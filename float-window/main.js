@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, globalShortcut } = require('electron');
 
 let win = null;
 let tray = null;
@@ -83,11 +83,20 @@ ipcMain.on('win-opacity', (_event, value) => {
 app.whenReady().then(() => {
   createWindow();
   createTray();
+
+  // 全局快捷键 Alt+Q：显示/隐藏切换
+  if (!globalShortcut.register('Alt+Q', toggleWindow)) {
+    console.error('全局快捷键 Alt+Q 注册失败（可能被其他程序占用）');
+  }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
   });
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
 });
 
 app.on('window-all-closed', () => {
