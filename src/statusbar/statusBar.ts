@@ -26,8 +26,6 @@ const SIGNAL_UP_RED = '#E53935';
 const SIGNAL_DOWN_GREEN = '#00B050';
 /** 闪烁间隙/无数据时的灰色 */
 const BAR_GRAY = '#A0A0A0';
-/** 快速涨跌提示阈值（%/分钟）：10 秒采样约 0.08%/10s */
-const SURGE_FAST_THRESHOLD = 0.5;
 
 export class StatusBar {
   private stockService: StockService;
@@ -36,21 +34,11 @@ export class StatusBar {
   private statusBarList: StatusBarItem[] = [];
   private statusBarGroupList: StatusBarItem[] = [];
   private statusBarGroupNames: string[] = [];
-  /** 快速涨跌提示条：状态栏最左第一位置（轮动），无信号时隐藏 */
-  private surgeUpBarItem: StatusBarItem;
-  private surgeDownBarItem: StatusBarItem;
-  /** 上次 10 秒采样基准价缓存（涨跌速判定用） */
-  private surgePriceCache: Map<string, { price: number; time: number }> = new Map();
   constructor(stockService: StockService, fundService: FundService) {
     this.stockService = stockService;
     this.fundService = fundService;
     this.statusBarList = [];
     this.fundBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 3);
-    // priority 高于普通分组（100-index）与个股（3），确保占据最左位置
-    this.surgeUpBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 210);
-    this.surgeDownBarItem = window.createStatusBarItem(StatusBarAlignment.Left, 200);
-    this.surgeUpBarItem.hide();
-    this.surgeDownBarItem.hide();
     this.refreshStockStatusBar();
     this.bindEvents();
     /* events.on('updateConfig:leek-fund.statusBarStock',()=>{
@@ -90,7 +78,6 @@ export class StatusBar {
     events.on('stockListUpdate', () => {
       this.refreshStockStatusBar();
       this.refreshStockGroupStatusBar();
-      this.refreshSurgeStatusBar();
     });
     events.on('fundListUpdate', () => {
       this.refreshFundStatusBar();
@@ -101,7 +88,6 @@ export class StatusBar {
     this.refreshFundStatusBar();
     this.refreshStockStatusBar();
     this.refreshStockGroupStatusBar();
-    this.refreshSurgeStatusBar();
   }
 
   /** 切换状态栏显示 */
@@ -366,198 +352,6 @@ export class StatusBar {
     });
     this.statusBarGroupList = [];
     this.statusBarGroupNames = [];
-  }
-
-  /**
-   * 快速涨跌提示：状态栏最左，涨速条与跌速条常驻（无信号时显示 1min 榜）。
-   * 涨速条候选优先级：涨停 → 10s 涨速达标 → 1min 涨幅最大；
-   * 跌速条对称。显示同时带 10s 涨速与 1min 涨跌幅。
-   */
-  async refreshSurgeStatusBar() {
-    if (this.hideStatusBar || this.hideStatusBarStock) {
-      this.surgeUpBarItem.hide();
-      this.surgeDownBarItem.hide();
-      return;
-    }
-
-    const now = Date.now();
-    const stocks = this.stockService.stockList;
-    const metrics = await Promise.all(
-      stocks.map(async (item) => {
-        const code = item.info.code;
-        const curPrice = parseFloat(item.info.price || '');
-        if (isNaN(curPrice) || curPrice <= 0) {
-          return null;
-        }
-        // 10 秒涨速：基准价每约 10 秒更新一次，涨速 = 10 秒涨跌归一化到 %/分钟
-        let speed10s = 0;
-        const last = this.surgePriceCache.get(code);
-        if (last) {
-          const elapsedSec = (now - last.time) / 1000;
-          if (elapsedSec >= 8 && elapsedSec <= 60) {
-            const diffPct = (curPrice / last.price - 1) * 100;
-            speed10s = diffPct * (60 / elapsedSec);
-          }
-          if (elapsedSec >= 8) {
-            // 达到采样间隔，更新基准
-            this.surgePriceCache.set(code, { price: curPrice, time: now });
-          }
-        } else {
-          this.surgePriceCache.set(code, { price: curPrice, time: now });
-        }
-        const percent = parseFloat(item.info.percent || '');
-        return {
-          code,
-          name: item.info.name || code,
-          percent: isNaN(percent) ? 0 : percent,
-          speed10s,
-          limit: this.getLimitState(code, item.info.name || '', percent),
-        };
-      })
-    );
-    const valid = metrics.filter((m) => m !== null) as Array<{
-      code: string;
-      name: string;
-      percent: number;
-      speed10s: number;
-      limit: 'up' | 'down' | null;
-    }>;
-
-    // 清理不再属于自选股的缓存
-    const liveCodes = stocks.map((item) => item.info.code);
-    this.surgePriceCache.forEach((_, code) => {
-      if (!liveCodes.includes(code)) {
-        this.surgePriceCache.delete(code);
-      }
-    });
-
-    const sortBySpeed = (a: typeof valid[0], b: typeof valid[0]) => b.speed10s - a.speed10s;
-
-    // 涨速条：涨停（仅封板瞬间/仍有买盘冲击时）> 10s 涨速达标 > 10s 涨速最大（恒常显示）
-    const upLimit = valid
-      .filter((m) => m.limit === 'up' && m.speed10s > 0)
-      .sort((a, b) => b.percent - a.percent);
-    const upFast = valid
-      .filter((m) => m.limit !== 'up' && m.speed10s >= SURGE_FAST_THRESHOLD)
-      .sort(sortBySpeed);
-    const upSlow = valid.filter((m) => m.limit !== 'up').sort(sortBySpeed);
-    // 跌速条：跌停（仅封板瞬间/仍有抛压时）> 10s 跌速达标 > 10s 跌速最大（恒常显示）
-    const downLimit = valid
-      .filter((m) => m.limit === 'down' && m.speed10s < 0)
-      .sort((a, b) => a.percent - b.percent);
-    const downFast = valid
-      .filter((m) => m.limit !== 'down' && m.speed10s <= -SURGE_FAST_THRESHOLD)
-      .sort(sortBySpeed);
-    const downSlow = valid.filter((m) => m.limit !== 'down').sort((a, b) => a.speed10s - b.speed10s);
-
-    const upHit = upLimit[0] ?? upFast[0] ?? upSlow[0];
-    const downHit = downLimit[0] ?? downFast[0] ?? downSlow[0];
-
-    if (upHit) {
-      const hit = upHit;
-      let text: string;
-      if (hit.limit === 'up') {
-        text = `${this.shortenName(hit.name)} 涨停`;
-      } else {
-        text = `${this.shortenName(hit.name)} +${Number(hit.speed10s.toFixed(1))}%`;
-      }
-      this.surgeUpBarItem.text = text;
-      this.surgeUpBarItem.color = SIGNAL_UP_RED;
-      this.surgeUpBarItem.command = {
-        title: 'Change stock',
-        command: 'leek-fund.changeStatusBarItem',
-        arguments: [this.findStockId(hit.code)],
-      };
-      this.updateSurgeTooltip(this.surgeUpBarItem, hit, '涨');
-      this.surgeUpBarItem.show();
-    } else {
-      this.surgeUpBarItem.hide();
-    }
-
-    if (downHit) {
-      const hit = downHit;
-      let text: string;
-      if (hit.limit === 'down') {
-        text = `${this.shortenName(hit.name)} 跌停`;
-      } else {
-        text = `${this.shortenName(hit.name)} ${Number(hit.speed10s.toFixed(1))}%`;
-      }
-      this.surgeDownBarItem.text = text;
-      this.surgeDownBarItem.color = SIGNAL_DOWN_GREEN;
-      this.surgeDownBarItem.command = {
-        title: 'Change stock',
-        command: 'leek-fund.changeStatusBarItem',
-        arguments: [this.findStockId(hit.code)],
-      };
-      this.updateSurgeTooltip(this.surgeDownBarItem, hit, '跌');
-      this.surgeDownBarItem.show();
-    } else {
-      this.surgeDownBarItem.hide();
-    }
-  }
-
-  /** 状态栏名称长度控制：>4 字截前 4 字；≤2 字保持原样（无更长数据源可补全） */
-  private shortenName(name: string): string {
-    if (name.length > 4) {
-      return name.slice(0, 4);
-    }
-    return name;
-  }
-
-  /** A股涨跌停判定（主板 10%、创业/科创 20%、北交所 30%、ST 5%）；港股/美股/期货无涨跌停 */
-  private getLimitState(code: string, name: string, percent: number): 'up' | 'down' | null {
-    const match = code.match(/^(sh|sz|bj)(\d{6})/);
-    if (!match) {
-      return null;
-    }
-    const num = match[2];
-    let threshold = 10;
-    if (/^(688|30)/.test(num)) {
-      threshold = 20;
-    } else if (/^[48]/.test(num)) {
-      threshold = 30;
-    } else if (/ST/i.test(name)) {
-      threshold = 5;
-    }
-    if (percent >= threshold - 0.1) {
-      return 'up';
-    }
-    if (percent <= -(threshold - 0.1)) {
-      return 'down';
-    }
-    return null;
-  }
-
-  /** 按代码查找自选股条目 id（用于切换状态栏展示） */
-  private findStockId(code: string): string {
-    const item = this.stockService.stockList.find((stock) => stock.info.code === code);
-    return item?.id || code;
-  }
-
-  async updateSurgeTooltip(
-    barItem: StatusBarItem,
-    hit: {
-      code: string;
-      name: string;
-      percent: number;
-      speed10s: number;
-      limit: 'up' | 'down' | null;
-    },
-    direction: '涨' | '跌'
-  ) {
-    try {
-      const dataUri = await getStockChartDataUri(hit.code);
-      const lines: Array<string> = [
-        `${hit.name}（${hit.code}） ${hit.percent >= 0 ? '+' : ''}${hit.percent}%`,
-        `${direction}速 ${Math.abs(hit.speed10s).toFixed(2)}%/分钟`,
-      ];
-      if (dataUri) {
-        lines.push('', `![分时图](${dataUri})`);
-      }
-      barItem.tooltip = new MarkdownString(joinMarkdownLines(lines));
-    } catch (err) {
-      console.error('update surge tooltip error:', err);
-    }
   }
 
   updateGroupBarInfo(
