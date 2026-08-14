@@ -135,7 +135,7 @@ function render(quotes) {
       html += g.members
         .map(
           (m) =>
-            `<div class="stock-row" title="${m.name}" data-code="${m.code}" data-name="${m.name}"><span class="sname">${formatName(m.name)}</span><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span><span class="del" title="删除股票">×</span></div>`
+            `<div class="stock-row" title="${m.name}" data-code="${m.code}" data-name="${m.name}" data-group="${g.name}"><span class="sname">${formatName(m.name)}</span><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span><span class="del" title="从分组移除">×</span></div>`
         )
         .join('');
       html += `<div class="add-stock-row" data-name="${g.name}">➕ 添加股票到此分组</div>`;
@@ -209,7 +209,12 @@ document.getElementById('list').addEventListener('click', (e) => {
   if (del) {
     const stockRow = del.closest('.stock-row');
     if (stockRow) {
-      showConfirm('stock', stockRow.dataset.code, stockRow.dataset.name);
+      const group = stockRow.dataset.group;
+      if (group) {
+        showConfirm('stock-in-group', stockRow.dataset.code, stockRow.dataset.name, group);
+      } else {
+        showConfirm('stock', stockRow.dataset.code, stockRow.dataset.name);
+      }
       return;
     }
     const groupRow = del.closest('.group-header');
@@ -236,10 +241,16 @@ document.getElementById('list').addEventListener('click', (e) => {
 // 删除确认条
 const confirmBar = document.getElementById('confirmBar');
 const confirmText = document.getElementById('confirmText');
-let pendingDelete = null; // { type: 'stock'|'group', code?, name? }
-function showConfirm(type, code, name) {
-  pendingDelete = { type, code, name };
-  confirmText.textContent = type === 'group' ? `删除分组「${name}」？（组内不再属于其他组的股票将一并删除）` : `删除 ${name}（${code}）？`;
+let pendingDelete = null; // { type: 'stock'|'stock-in-group'|'group', code?, name?, group? }
+function showConfirm(type, code, name, group) {
+  pendingDelete = { type, code, name, group };
+  if (type === 'group') {
+    confirmText.textContent = `删除分组「${name}」？（组内不再属于其他组的股票将一并删除）`;
+  } else if (type === 'stock-in-group') {
+    confirmText.textContent = `从「${group}」移除 ${name}（${code}）？`;
+  } else {
+    confirmText.textContent = `删除 ${name}（${code}）？`;
+  }
   confirmBar.style.display = 'flex';
 }
 function hideConfirm() {
@@ -252,6 +263,8 @@ document.getElementById('confirmYes').addEventListener('click', () => {
   hideConfirm();
   if (p.type === 'stock') {
     deleteStock(p.code);
+  } else if (p.type === 'stock-in-group') {
+    removeStockFromGroup(p.code, p.group);
   } else {
     deleteGroup(p.name);
   }
@@ -273,6 +286,16 @@ function deleteStock(code) {
     obj['leek-fund.stockGroupStocks'] = (obj['leek-fund.stockGroupStocks'] || []).map((arr) =>
       (arr || []).filter((c) => c !== code)
     );
+  }).then(() => tick());
+}
+
+function removeStockFromGroup(code, groupName) {
+  writeLeekConfig((obj) => {
+    const groups = obj['leek-fund.stockGroups'] || [];
+    const gi = groups.indexOf(groupName);
+    if (gi < 0) return;
+    const arrs = obj['leek-fund.stockGroupStocks'] || [];
+    arrs[gi] = (arrs[gi] || []).filter((c) => c !== code);
   }).then(() => tick());
 }
 
