@@ -133,6 +133,7 @@ function render(quotes) {
             `<div class="stock-row" title="${m.name}" data-code="${m.code}" data-name="${m.name}"><span class="sname">${formatName(m.name)}</span><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span><span class="del" title="删除股票">×</span></div>`
         )
         .join('');
+      html += `<div class="add-stock-row" data-name="${g.name}">➕ 添加股票到此分组</div>`;
     }
   });
   // 未分组个股（恒在底部，不参与分组排序）
@@ -178,8 +179,14 @@ async function tick() {
 document.getElementById('btnClose').addEventListener('click', () => ipcRenderer.send('win-close'));
 document.getElementById('btnMin').addEventListener('click', () => ipcRenderer.send('win-hide'));
 
-// 列表点击：× 删除按钮 → 确认条；分组标题 → 折叠/展开
+// 列表点击：组内「添加股票到此分组」/ × 删除（确认条）/ 分组标题折叠
 document.getElementById('list').addEventListener('click', (e) => {
+  const addRow = e.target.closest('.add-stock-row');
+  if (addRow) {
+    const name = addRow.dataset.name;
+    if (name) openAddPanel('addToGroup', `搜索添加到「${name}」`, name);
+    return;
+  }
   const del = e.target.closest('.del');
   if (del) {
     const stockRow = del.closest('.stock-row');
@@ -319,11 +326,13 @@ function writeLeekConfig(mutator) {
 const addPanel = document.getElementById('addPanel');
 const addInput = document.getElementById('addInput');
 const addResults = document.getElementById('addResults');
-let addMode = 'stock'; // 'stock' | 'group'
+let addMode = 'stock'; // 'stock' | 'group' | 'addToGroup'
+let addTargetGroup = null; // addToGroup 模式的目标分组
 let searchTimer = null;
 
-function openAddPanel(mode, placeholder) {
+function openAddPanel(mode, placeholder, targetGroup) {
   addMode = mode;
+  addTargetGroup = targetGroup || null;
   addInput.placeholder = placeholder;
   addInput.value = '';
   addResults.innerHTML = '';
@@ -402,6 +411,29 @@ addResults.addEventListener('click', (e) => {
   const item = e.target.closest('.add-result');
   if (!item || !item.dataset.code) return;
   const code = item.dataset.code;
+  if (addMode === 'addToGroup') {
+    const groupName = addTargetGroup;
+    writeLeekConfig((obj) => {
+      const groups = obj['leek-fund.stockGroups'] || [];
+      const gi = groups.indexOf(groupName);
+      if (gi < 0) return;
+      const arrs = obj['leek-fund.stockGroupStocks'] || [];
+      const arr = arrs[gi] || [];
+      if (!arr.includes(code)) {
+        arrs[gi] = [...arr, code];
+        obj['leek-fund.stockGroupStocks'] = arrs;
+      }
+      const stocks = obj['leek-fund.stocks'] || [];
+      if (!stocks.includes(code)) {
+        stocks.push(code);
+        obj['leek-fund.stocks'] = stocks;
+      }
+    }).then(() => {
+      closeAddPanel();
+      tick();
+    });
+    return;
+  }
   writeLeekConfig((obj) => {
     const stocks = obj['leek-fund.stocks'] || [];
     if (!stocks.includes(code)) {
