@@ -164,7 +164,7 @@ async function tick() {
 
 // 事件
 document.getElementById('btnClose').addEventListener('click', () => ipcRenderer.send('win-close'));
-document.getElementById('btnMin').addEventListener('click', () => ipcRenderer.send('win-minimize'));
+document.getElementById('btnMin').addEventListener('click', () => ipcRenderer.send('win-hide'));
 
 // 滚轮：列表内滚动（不调透明度），其余区域调透明度
 let opacity = 0.92;
