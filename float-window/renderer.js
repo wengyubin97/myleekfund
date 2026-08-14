@@ -33,8 +33,33 @@ function loadLeekConfig() {
 
 const cfg = loadLeekConfig();
 
+// 界面状态（折叠分组/排序开关），localStorage 持久化
+const uiState = loadUIState();
+function loadUIState() {
+  try {
+    const s = JSON.parse(localStorage.getItem('leekFloatUi') || '{}');
+    return {
+      collapsed: s.collapsed || {},
+      groupSort: !!s.groupSort,
+      stockSort: !!s.stockSort,
+    };
+  } catch (err) {
+    console.error('读取界面状态失败：', err.message);
+    return { collapsed: {}, groupSort: false, stockSort: false };
+  }
+}
+function saveUIState() {
+  try {
+    localStorage.setItem('leekFloatUi', JSON.stringify(uiState));
+  } catch (err) {
+    console.error('保存界面状态失败：', err.message);
+  }
+}
+
 // 涨跌速采样基准缓存
 const speedBase = new Map(); // code -> { price, time }
+let lastQuotes = null; // 最近一次行情，供折叠/排序触发重渲染
+let currentGroups = []; // 最近一次渲染的分组列表（data-idx 索引用）
 
 function formatName(name) {
   if (!name) return '--';
@@ -110,33 +135,52 @@ function render(quotes) {
     downValEl.textContent = `${sign(downBest.speed)}${Number(downBest.speed.toFixed(1))}%`;
   }
 
-  // 个股列表（按分组）
+  lastQuotes = quotes;
+
+  // 个股列表（按分组；支持折叠与排序）
   const grouped = new Set();
   let html = '';
-  cfg.groups.forEach((gname, gi) => {
-    const codes = cfg.groupStocks[gi] || [];
-    const members = quotes.filter((q) => codes.includes(q.code));
-    if (!members.length) return;
-    members.forEach((m) => grouped.add(m.code));
-    const avg = members.reduce((s, m) => s + m.percent, 0) / members.length;
-    html += `<div class="group-row"><span class="gname">${gname}(${members.length})</span><span class="gavg ${clsOf(avg)}">${sign(avg)}${avg.toFixed(2)}%</span></div>`;
-    html += members
-      .map(
-        (m) =>
-          `<div class="stock-row" title="${m.name}"><span class="sname">${formatName(m.name)}</span><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span></div>`
-      )
-      .join('');
+  let groups = cfg.groups.map((gname, gi) => ({
+    name: gname,
+    members: quotes.filter((q) => (cfg.groupStocks[gi] || []).includes(q.code)),
+  }));
+  groups = groups.filter((g) => g.members.length);
+  groups.forEach((g) => g.members.forEach((m) => grouped.add(m.code)));
+  if (uiState.groupSort) {
+    const avgOf = (g) => g.members.reduce((s, m) => s + m.percent, 0) / g.members.length;
+    groups.sort((a, b) => avgOf(b) - avgOf(a));
+  }
+  if (uiState.stockSort) {
+    groups.forEach((g) => g.members.sort((a, b) => b.percent - a.percent));
+  }
+  currentGroups = groups;
+  groups.forEach((g, i) => {
+    const avg = g.members.reduce((s, m) => s + m.percent, 0) / g.members.length;
+    const collapsed = !!uiState.collapsed[g.name];
+    html += `<div class="group-row group-header" data-idx="${i}"><span class="gmarker">${collapsed ? '▸' : '▾'}</span><span class="gname">${g.name}(${g.members.length})</span><span class="gavg ${clsOf(avg)}">${sign(avg)}${avg.toFixed(2)}%</span></div>`;
+    if (!collapsed) {
+      html += g.members
+        .map(
+          (m) =>
+            `<div class="stock-row" title="${m.name}"><span class="sname">${formatName(m.name)}</span><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span></div>`
+        )
+        .join('');
+    }
   });
-  // 未分组个股
+  // 未分组个股（恒在底部，不参与分组排序）
   const rest = quotes.filter((q) => !grouped.has(q.code));
   if (rest.length) {
-    html += `<div class="group-row"><span class="gname">全部(${rest.length})</span><span class="gavg"></span></div>`;
-    html += rest
-      .map(
-        (m) =>
-          `<div class="stock-row" title="${m.name}"><span class="sname">${formatName(m.name)}</span><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span></div>`
-      )
-      .join('');
+    const collapsed = !!uiState.collapsed['__rest__'];
+    html += `<div class="group-row group-header" data-idx="${groups.length}"><span class="gmarker">${collapsed ? '▸' : '▾'}</span><span class="gname">全部(${rest.length})</span><span class="gavg"></span></div>`;
+    if (!collapsed) {
+      const restSorted = uiState.stockSort ? rest.slice().sort((a, b) => b.percent - a.percent) : rest;
+      html += restSorted
+        .map(
+          (m) =>
+            `<div class="stock-row" title="${m.name}"><span class="sname">${formatName(m.name)}</span><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span></div>`
+        )
+        .join('');
+    }
   }
   if (!quotes.length) {
     html = `<div class="group-row">无自选股（请在 VSCode settings.json 配置 leek-fund.stocks）</div>`;
@@ -165,6 +209,34 @@ async function tick() {
 // 事件
 document.getElementById('btnClose').addEventListener('click', () => ipcRenderer.send('win-close'));
 document.getElementById('btnMin').addEventListener('click', () => ipcRenderer.send('win-hide'));
+
+// 分组标题点击：折叠/展开
+document.getElementById('list').addEventListener('click', (e) => {
+  const row = e.target.closest('.group-header');
+  if (!row) return;
+  const idx = Number(row.dataset.idx);
+  const key = idx >= currentGroups.length ? '__rest__' : currentGroups[idx].name;
+  uiState.collapsed[key] = !uiState.collapsed[key];
+  saveUIState();
+  if (lastQuotes) render(lastQuotes);
+});
+
+// 排序开关：分组（平均涨跌幅）/个股（涨跌幅），默认顺序 ↔ 降序
+const btnGroupSort = document.getElementById('btnGroupSort');
+const btnStockSort = document.getElementById('btnStockSort');
+function syncSortButtons() {
+  btnGroupSort.classList.toggle('active', uiState.groupSort);
+  btnStockSort.classList.toggle('active', uiState.stockSort);
+}
+function toggleSort(key) {
+  uiState[key] = !uiState[key];
+  saveUIState();
+  syncSortButtons();
+  if (lastQuotes) render(lastQuotes);
+}
+btnGroupSort.addEventListener('click', () => toggleSort('groupSort'));
+btnStockSort.addEventListener('click', () => toggleSort('stockSort'));
+syncSortButtons();
 
 // 滚轮：列表内滚动（不调透明度），其余区域调透明度
 let opacity = 0.92;
