@@ -316,16 +316,18 @@ btnGroupSort.addEventListener('click', () => toggleSort('groupSort'));
 btnStockSort.addEventListener('click', () => toggleSort('stockSort'));
 syncSortButtons();
 
-// 滚轮：列表内滚动（不调透明度），其余区域调透明度
-let opacity = 0.92;
-document.addEventListener('wheel', (e) => {
-  const listEl = document.getElementById('list');
-  const overList = e.target instanceof Element && e.target.closest('#list');
-  if (overList && listEl.scrollHeight > listEl.clientHeight) return;
-  opacity += e.deltaY > 0 ? -0.05 : 0.05;
-  opacity = Math.max(0.15, Math.min(1, opacity));
-  ipcRenderer.send('win-opacity', opacity);
+// 透明度：底部滑杆（滚轮不再参与，列表内滚轮为原生滚动）
+document.getElementById('opacitySlider').addEventListener('input', (e) => {
+  ipcRenderer.send('win-opacity', Number(e.target.value) / 100);
 });
+
+// 滚轮：K线图视图下缩放时间周期（上滚放大/下滚缩小，始终显示最新 N 根）
+document.addEventListener('wheel', (e) => {
+  if (!chartCode || chartMode === 'minute') return;
+  const delta = e.deltaY > 0 ? 10 : -10;
+  klineCount = Math.min(klineMax, Math.max(10, klineCount + delta));
+  drawChart();
+}, { passive: true });
 
 // ---- settings.json 增删改（只动 leek-fund 键，串行队列防并发写） ----
 function settingsPath() {
@@ -492,6 +494,8 @@ const chartLegendEl = document.getElementById('chartLegend');
 let chartCode = null;
 let chartName = '';
 let chartMode = 'minute';
+let klineCount = 220; // K线默认显示根数（最新 N 根）
+let klineMax = 220; // 当前数据最大根数
 const chartCache = new Map(); // `${code}:${mode}` -> { time, data }
 
 const MINUTE_QUERY = 'https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=';
@@ -678,7 +682,7 @@ function drawMinute(ctx, w, h, data) {
   chartLegendEl.textContent = `昨收 ${prevClose}  现价 ${points[points.length - 1].price.toFixed(2)}  ${lastPct >= 0 ? '+' : ''}${lastPct.toFixed(2)}%`;
 }
 
-function drawKline(ctx, w, h, bars, mode) {
+function drawKline(ctx, w, h, bars, mode, total) {
   const padL = 10;
   const padR = 10;
   const padT = 10;
@@ -759,10 +763,10 @@ function drawKline(ctx, w, h, bars, mode) {
     ctx.fillText(bars[i].date.slice(2), toX(i) - 12, h - 6);
   });
 
-  // 图例：最新一根 OHLC
+  // 图例：最新一根 OHLC + 显示根数
   const last = bars[n - 1];
   const pct = (last.close / bars[n - 2].close - 1) * 100;
-  chartLegendEl.textContent = `开 ${last.open.toFixed(2)} 高 ${last.high.toFixed(2)} 低 ${last.low.toFixed(2)} 收 ${last.close.toFixed(2)}  ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+  chartLegendEl.textContent = `显示 ${bars.length}/${total} 根 · 开 ${last.open.toFixed(2)} 高 ${last.high.toFixed(2)} 低 ${last.low.toFixed(2)} 收 ${last.close.toFixed(2)}  ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
 }
 
 async function drawChart() {
@@ -789,7 +793,9 @@ async function drawChart() {
   if (mode === 'minute') {
     drawMinute(ctx, w, h, data);
   } else {
-    drawKline(ctx, w, h, data, mode);
+    klineMax = data.length;
+    if (klineCount > klineMax) klineCount = klineMax;
+    drawKline(ctx, w, h, data.slice(-klineCount), mode, data.length);
   }
 }
 

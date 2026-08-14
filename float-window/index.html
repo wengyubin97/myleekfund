@@ -180,6 +180,7 @@
       padding: 0 8px;
     }
     #footer .hint { margin-left: auto; }
+    #opacitySlider { width: 70px; accent-color: #43a047; margin-left: 6px; }
   </style>
 </head>
 <body>
@@ -221,7 +222,8 @@
     </div>
     <div id="footer">
       <span id="updated">--</span>
-      <span class="hint">列表滚轮滚动 · 其它区域调透明度 · 右键菜单</span>
+      <span class="hint">右键菜单</span>
+      <input type="range" id="opacitySlider" min="15" max="100" value="92" title="窗口透明度" />
     </div>
   </div>
   <script src="renderer.js"></script>
