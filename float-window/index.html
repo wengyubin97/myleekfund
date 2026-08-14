@@ -47,6 +47,7 @@
     }
     #titlebar button:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
     #titlebar button.active { color: #43a047; font-weight: 700; }
+    #titlebar button.btntext { width: auto; padding: 0 5px; font-size: 11px; }
     #list { flex: 1; overflow-y: auto; padding: 0 8px 8px 8px; }
     #addPanel { flex: none; display: none; padding: 4px 8px; border-bottom: 1px solid rgba(255,255,255,0.08); }
     #addPanel input {
@@ -73,6 +74,25 @@
     .add-result:hover { background: rgba(255, 255, 255, 0.1); }
     .add-result .rcode { color: #9a9a9a; margin-left: auto; }
     .add-hint { font-size: 11px; color: #9a9a9a; padding: 3px 6px; }
+    #confirmBar {
+      flex: none;
+      display: none;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 12px;
+      color: #e8e8e8;
+    }
+    #confirmBar button {
+      border: none;
+      border-radius: 4px;
+      font-size: 11px;
+      padding: 2px 8px;
+      cursor: pointer;
+    }
+    #confirmYes { background: rgba(229, 57, 53, 0.75); color: #fff; }
+    #confirmNo { background: rgba(255, 255, 255, 0.12); color: #e8e8e8; }
     #list::-webkit-scrollbar { width: 4px; }
     #list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
     .group-row {
@@ -89,6 +109,8 @@
     .group-row .gmarker { flex: none; width: 14px; color: #888; font-size: 10px; }
     .group-row .gname { font-weight: 600; }
     .group-row .gavg { margin-left: auto; }
+    .group-row .del { opacity: 0; flex: none; width: 14px; text-align: center; color: #ff8a87; font-size: 12px; cursor: pointer; }
+    .group-row:hover .del { opacity: 1; }
     .stock-row {
       display: flex;
       align-items: center;
@@ -101,6 +123,8 @@
     .stock-row .sname { flex: none; max-width: 78px; overflow: hidden; text-overflow: ellipsis; }
     .stock-row .sprice { flex: none; width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
     .stock-row .spct { flex: none; width: 58px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .stock-row .del { opacity: 0; flex: none; width: 14px; text-align: center; color: #ff8a87; font-size: 12px; cursor: pointer; }
+    .stock-row:hover .del { opacity: 1; }
     .up { color: #ff8a87; }
     .down { color: #7fd6a4; }
     .flat { color: #c8c8c8; }
@@ -122,6 +146,8 @@
     <div id="titlebar">
       <span>🥬 韭菜悬浮窗</span>
       <span class="btns">
+        <button id="btnAddStock" class="btntext" title="添加股票">+股</button>
+        <button id="btnAddGroup" class="btntext" title="添加分组">+组</button>
         <button id="btnGroupSort" title="分组排序：默认/平均涨跌幅降序">组</button>
         <button id="btnStockSort" title="个股排序：默认/涨跌幅降序">股</button>
         <button id="btnMin" title="隐藏到托盘">—</button>
@@ -133,6 +159,11 @@
       <div id="addResults"></div>
     </div>
     <div id="list"></div>
+    <div id="confirmBar">
+      <span id="confirmText"></span>
+      <button id="confirmYes">删除</button>
+      <button id="confirmNo">取消</button>
+    </div>
     <div id="footer">
       <span id="updated">--</span>
       <span class="hint">列表滚轮滚动 · 其它区域调透明度 · 右键菜单</span>

@@ -125,12 +125,12 @@ function render(quotes) {
   groups.forEach((g, i) => {
     const avg = g.members.reduce((s, m) => s + m.percent, 0) / g.members.length;
     const collapsed = !!uiState.collapsed[g.name];
-    html += `<div class="group-row group-header" data-idx="${i}" data-name="${g.name}"><span class="gmarker">${collapsed ? '▸' : '▾'}</span><span class="gname">${g.name}(${g.members.length})</span><span class="gavg ${clsOf(avg)}">${sign(avg)}${avg.toFixed(2)}%</span></div>`;
+    html += `<div class="group-row group-header" data-idx="${i}" data-name="${g.name}"><span class="gmarker">${collapsed ? '▸' : '▾'}</span><span class="gname">${g.name}(${g.members.length})</span><span class="gavg ${clsOf(avg)}">${sign(avg)}${avg.toFixed(2)}%</span><span class="del" title="删除分组">×</span></div>`;
     if (!collapsed) {
       html += g.members
         .map(
           (m) =>
-            `<div class="stock-row" title="${m.name}" data-code="${m.code}" data-name="${m.name}"><span class="sname">${formatName(m.name)}</span><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span></div>`
+            `<div class="stock-row" title="${m.name}" data-code="${m.code}" data-name="${m.name}"><span class="sname">${formatName(m.name)}</span><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span><span class="del" title="删除股票">×</span></div>`
         )
         .join('');
     }
@@ -145,7 +145,7 @@ function render(quotes) {
       html += restSorted
         .map(
           (m) =>
-            `<div class="stock-row" title="${m.name}" data-code="${m.code}" data-name="${m.name}"><span class="sname">${formatName(m.name)}</span><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span></div>`
+            `<div class="stock-row" title="${m.name}" data-code="${m.code}" data-name="${m.name}"><span class="sname">${formatName(m.name)}</span><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span><span class="del" title="删除股票">×</span></div>`
         )
         .join('');
     }
@@ -178,8 +178,22 @@ async function tick() {
 document.getElementById('btnClose').addEventListener('click', () => ipcRenderer.send('win-close'));
 document.getElementById('btnMin').addEventListener('click', () => ipcRenderer.send('win-hide'));
 
-// 分组标题点击：折叠/展开
+// 列表点击：× 删除按钮 → 确认条；分组标题 → 折叠/展开
 document.getElementById('list').addEventListener('click', (e) => {
+  const del = e.target.closest('.del');
+  if (del) {
+    const stockRow = del.closest('.stock-row');
+    if (stockRow) {
+      showConfirm('stock', stockRow.dataset.code, stockRow.dataset.name);
+      return;
+    }
+    const groupRow = del.closest('.group-header');
+    if (groupRow && groupRow.dataset.name) {
+      showConfirm('group', null, groupRow.dataset.name);
+      return;
+    }
+    return;
+  }
   const row = e.target.closest('.group-header');
   if (!row) return;
   const idx = Number(row.dataset.idx);
@@ -188,6 +202,66 @@ document.getElementById('list').addEventListener('click', (e) => {
   saveUIState();
   if (lastQuotes) render(lastQuotes);
 });
+
+// 删除确认条
+const confirmBar = document.getElementById('confirmBar');
+const confirmText = document.getElementById('confirmText');
+let pendingDelete = null; // { type: 'stock'|'group', code?, name? }
+function showConfirm(type, code, name) {
+  pendingDelete = { type, code, name };
+  confirmText.textContent = type === 'group' ? `删除分组「${name}」？（组内不再属于其他组的股票将一并删除）` : `删除 ${name}（${code}）？`;
+  confirmBar.style.display = 'flex';
+}
+function hideConfirm() {
+  pendingDelete = null;
+  confirmBar.style.display = 'none';
+}
+document.getElementById('confirmYes').addEventListener('click', () => {
+  const p = pendingDelete;
+  if (!p) return;
+  hideConfirm();
+  if (p.type === 'stock') {
+    deleteStock(p.code);
+  } else {
+    deleteGroup(p.name);
+  }
+});
+document.getElementById('confirmNo').addEventListener('click', hideConfirm);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') hideConfirm();
+});
+
+function deleteStock(code) {
+  writeLeekConfig((obj) => {
+    obj['leek-fund.stocks'] = (obj['leek-fund.stocks'] || []).filter((c) => c !== code);
+    obj['leek-fund.stockGroupStocks'] = (obj['leek-fund.stockGroupStocks'] || []).map((arr) =>
+      (arr || []).filter((c) => c !== code)
+    );
+  }).then(() => tick());
+}
+
+function deleteGroup(name) {
+  writeLeekConfig((obj) => {
+    const groups = obj['leek-fund.stockGroups'] || [];
+    const gi = groups.indexOf(name);
+    if (gi < 0) return;
+    const arrs = obj['leek-fund.stockGroupStocks'] || [];
+    const codes = arrs[gi] || [];
+    const inOtherGroups = new Set();
+    arrs.forEach((arr, i) => {
+      if (i !== gi) (arr || []).forEach((c) => inOtherGroups.add(c));
+    });
+    codes.forEach((c) => {
+      if (!inOtherGroups.has(c)) {
+        obj['leek-fund.stocks'] = (obj['leek-fund.stocks'] || []).filter((s) => s !== c);
+      }
+    });
+    groups.splice(gi, 1);
+    arrs.splice(gi, 1);
+    delete uiState.collapsed[name];
+    saveUIState();
+  }).then(() => tick());
+}
 
 // 排序开关：分组（平均涨跌幅）/个股（涨跌幅），默认顺序 ↔ 降序
 const btnGroupSort = document.getElementById('btnGroupSort');
@@ -215,27 +289,6 @@ document.addEventListener('wheel', (e) => {
   opacity += e.deltaY > 0 ? -0.05 : 0.05;
   opacity = Math.max(0.15, Math.min(1, opacity));
   ipcRenderer.send('win-opacity', opacity);
-});
-
-// ---- 右键菜单分发：个股/分组行 → 删除；其余 → 应用菜单（添加股票/分组等） ----
-document.addEventListener('contextmenu', (e) => {
-  e.preventDefault();
-  const stockRow = e.target.closest('.stock-row');
-  const groupRow = e.target.closest('.group-header');
-  let type = 'app';
-  let code = null;
-  let name = null;
-  if (stockRow) {
-    type = 'stock';
-    code = stockRow.dataset.code;
-    name = stockRow.dataset.name;
-  } else if (groupRow && !groupRow.dataset.name) {
-    type = 'app';
-  } else if (groupRow) {
-    type = 'group';
-    name = groupRow.dataset.name;
-  }
-  ipcRenderer.send('context-menu', { type, code, name, x: e.screenX, y: e.screenY });
 });
 
 // ---- settings.json 增删改（只动 leek-fund 键，串行队列防并发写） ----
@@ -361,41 +414,9 @@ addResults.addEventListener('click', (e) => {
   });
 });
 
-// ---- IPC：主进程菜单动作 ----
-ipcRenderer.on('menu-add-stock', () => openAddPanel('stock', '输入股票名称/代码搜索'));
-ipcRenderer.on('menu-add-group', () => openAddPanel('group', '输入分组名称，回车创建'));
-
-ipcRenderer.on('delete-stock', (_e, code) => {
-  writeLeekConfig((obj) => {
-    obj['leek-fund.stocks'] = (obj['leek-fund.stocks'] || []).filter((c) => c !== code);
-    obj['leek-fund.stockGroupStocks'] = (obj['leek-fund.stockGroupStocks'] || []).map((arr) =>
-      (arr || []).filter((c) => c !== code)
-    );
-  }).then(() => tick());
-});
-
-ipcRenderer.on('delete-group', (_e, name) => {
-  writeLeekConfig((obj) => {
-    const groups = obj['leek-fund.stockGroups'] || [];
-    const gi = groups.indexOf(name);
-    if (gi < 0) return;
-    const arrs = obj['leek-fund.stockGroupStocks'] || [];
-    const codes = arrs[gi] || [];
-    const inOtherGroups = new Set();
-    arrs.forEach((arr, i) => {
-      if (i !== gi) (arr || []).forEach((c) => inOtherGroups.add(c));
-    });
-    codes.forEach((c) => {
-      if (!inOtherGroups.has(c)) {
-        obj['leek-fund.stocks'] = (obj['leek-fund.stocks'] || []).filter((s) => s !== c);
-      }
-    });
-    groups.splice(gi, 1);
-    arrs.splice(gi, 1);
-    delete uiState.collapsed[name];
-    saveUIState();
-  }).then(() => tick());
-});
+// ---- 标题栏按钮：添加股票 / 添加分组 ----
+document.getElementById('btnAddStock').addEventListener('click', () => openAddPanel('stock', '输入股票名称/代码搜索'));
+document.getElementById('btnAddGroup').addEventListener('click', () => openAddPanel('group', '输入分组名称，回车创建'));
 
 tick();
 setInterval(tick, POLL_INTERVAL);

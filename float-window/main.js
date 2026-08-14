@@ -28,6 +28,16 @@ function createWindow() {
   win.setMenuBarVisibility(false);
   win.loadFile('index.html');
 
+  // 右键菜单（窗口级：刷新/开发者工具/退出）
+  win.webContents.on('context-menu', () => {
+    Menu.buildFromTemplate([
+      { label: '刷新数据', click: () => win.webContents.reload() },
+      { label: '开发者工具', click: () => win.webContents.toggleDevTools() },
+      { type: 'separator' },
+      { label: '退出', click: () => app.quit() },
+    ]).popup({ window: win });
+  });
+
   win.on('closed', () => {
     win = null;
   });
@@ -68,32 +78,6 @@ ipcMain.on('win-opacity', (_event, value) => {
   if (win && typeof value === 'number') {
     win.setOpacity(Math.max(0.15, Math.min(1, value)));
   }
-});
-
-// 右键菜单（renderer 传入类型与屏幕坐标）：个股/分组行 → 删除；其余 → 应用菜单
-ipcMain.on('context-menu', (_event, info) => {
-  if (!win) return;
-  let template;
-  if (info.type === 'stock') {
-    template = [{ label: `删除 ${info.name || info.code}`, click: () => win.webContents.send('delete-stock', info.code) }];
-  } else if (info.type === 'group') {
-    template = [{ label: `删除分组「${info.name}」`, click: () => win.webContents.send('delete-group', info.name) }];
-  } else {
-    template = [
-      { label: '添加股票', click: () => win.webContents.send('menu-add-stock') },
-      { label: '添加分组', click: () => win.webContents.send('menu-add-group') },
-      { type: 'separator' },
-      { label: '刷新数据', click: () => win.webContents.reload() },
-      { label: '开发者工具', click: () => win.webContents.toggleDevTools() },
-      { type: 'separator' },
-      { label: '退出', click: () => app.quit() },
-    ];
-  }
-  Menu.buildFromTemplate(template).popup({
-    window: win,
-    x: Math.round(info.x),
-    y: Math.round(info.y),
-  });
 });
 
 app.whenReady().then(() => {
