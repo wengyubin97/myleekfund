@@ -1,6 +1,11 @@
-const { app, BrowserWindow, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage } = require('electron');
 
 let win = null;
+let tray = null;
+
+// 托盘图标：32x32 绿色圆点（内嵌 base64，勿改）
+const TRAY_ICON_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAA50lEQVR4nO1XwQ2DMAzMnzVYgBn88AoskD2yRz5+ZpCuwwQ8WkU6JBQ1CQWCqYQlfyDkLj7HNsY89k9Gwj0JjyTsSNiTcIB7PIvv+hbAAwBeJDyT8DvjM9bEtcNZ4Bab5kBzHr+xR4A7nGTaAb74hD26PQRcJdxbPe7hfgW3B0/+LRLb5EDC7dF8S07UExOhPxt88bIUuOctTr+OQr5OoJCckXilhBy1wl+XASW1NQFfIhAuIBBuTUBdAvUkVL+GuoXoAhnqXVG9GRntdpxIoTOQmDuMZCsiOkNpQkJvLE+I6PyYPNbSPvy1iJ1JOJZdAAAAAElFTkSuQmCC';
 
 function createWindow() {
   win = new BrowserWindow({
@@ -38,8 +43,37 @@ function createWindow() {
   });
 }
 
+function toggleWindow() {
+  if (!win) return;
+  if (win.isVisible()) {
+    win.hide();
+  } else {
+    win.show();
+    win.focus();
+  }
+}
+
+function createTray() {
+  try {
+    tray = new Tray(nativeImage.createFromDataURL(TRAY_ICON_DATA_URL));
+    tray.setToolTip('韭菜悬浮窗');
+    tray.on('click', toggleWindow);
+    tray.on('right-click', () => {
+      tray.popUpContextMenu(
+        Menu.buildFromTemplate([
+          { label: '显示/隐藏悬浮窗', click: toggleWindow },
+          { type: 'separator' },
+          { label: '退出', click: () => app.quit() },
+        ])
+      );
+    });
+  } catch (err) {
+    console.error('托盘创建失败：', err.message);
+  }
+}
+
 ipcMain.on('win-close', () => app.quit());
-ipcMain.on('win-minimize', () => win && win.minimize());
+ipcMain.on('win-hide', () => win && win.hide());
 ipcMain.on('win-opacity', (_event, value) => {
   if (win && typeof value === 'number') {
     win.setOpacity(Math.max(0.15, Math.min(1, value)));
@@ -48,6 +82,7 @@ ipcMain.on('win-opacity', (_event, value) => {
 
 app.whenReady().then(() => {
   createWindow();
+  createTray();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
