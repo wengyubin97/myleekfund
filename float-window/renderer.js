@@ -166,9 +166,12 @@ async function tick() {
 document.getElementById('btnClose').addEventListener('click', () => ipcRenderer.send('win-close'));
 document.getElementById('btnMin').addEventListener('click', () => ipcRenderer.send('win-minimize'));
 
-// 滚轮调透明度
+// 滚轮：列表内滚动（不调透明度），其余区域调透明度
 let opacity = 0.92;
 document.addEventListener('wheel', (e) => {
+  const listEl = document.getElementById('list');
+  const overList = e.target instanceof Element && e.target.closest('#list');
+  if (overList && listEl.scrollHeight > listEl.clientHeight) return;
   opacity += e.deltaY > 0 ? -0.05 : 0.05;
   opacity = Math.max(0.15, Math.min(1, opacity));
   ipcRenderer.send('win-opacity', opacity);
