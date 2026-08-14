@@ -125,12 +125,12 @@ function render(quotes) {
   groups.forEach((g, i) => {
     const avg = g.members.reduce((s, m) => s + m.percent, 0) / g.members.length;
     const collapsed = !!uiState.collapsed[g.name];
-    html += `<div class="group-row group-header" data-idx="${i}"><span class="gmarker">${collapsed ? '▸' : '▾'}</span><span class="gname">${g.name}(${g.members.length})</span><span class="gavg ${clsOf(avg)}">${sign(avg)}${avg.toFixed(2)}%</span></div>`;
+    html += `<div class="group-row group-header" data-idx="${i}" data-name="${g.name}"><span class="gmarker">${collapsed ? '▸' : '▾'}</span><span class="gname">${g.name}(${g.members.length})</span><span class="gavg ${clsOf(avg)}">${sign(avg)}${avg.toFixed(2)}%</span></div>`;
     if (!collapsed) {
       html += g.members
         .map(
           (m) =>
-            `<div class="stock-row" title="${m.name}"><span class="sname">${formatName(m.name)}</span><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span></div>`
+            `<div class="stock-row" title="${m.name}" data-code="${m.code}" data-name="${m.name}"><span class="sname">${formatName(m.name)}</span><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span></div>`
         )
         .join('');
     }
@@ -145,7 +145,7 @@ function render(quotes) {
       html += restSorted
         .map(
           (m) =>
-            `<div class="stock-row" title="${m.name}"><span class="sname">${formatName(m.name)}</span><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span></div>`
+            `<div class="stock-row" title="${m.name}" data-code="${m.code}" data-name="${m.name}"><span class="sname">${formatName(m.name)}</span><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span></div>`
         )
         .join('');
     }
@@ -215,6 +215,186 @@ document.addEventListener('wheel', (e) => {
   opacity += e.deltaY > 0 ? -0.05 : 0.05;
   opacity = Math.max(0.15, Math.min(1, opacity));
   ipcRenderer.send('win-opacity', opacity);
+});
+
+// ---- 右键菜单分发：个股/分组行 → 删除；其余 → 应用菜单（添加股票/分组等） ----
+document.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  const stockRow = e.target.closest('.stock-row');
+  const groupRow = e.target.closest('.group-header');
+  let type = 'app';
+  let code = null;
+  let name = null;
+  if (stockRow) {
+    type = 'stock';
+    code = stockRow.dataset.code;
+    name = stockRow.dataset.name;
+  } else if (groupRow && !groupRow.dataset.name) {
+    type = 'app';
+  } else if (groupRow) {
+    type = 'group';
+    name = groupRow.dataset.name;
+  }
+  ipcRenderer.send('context-menu', { type, code, name, x: e.screenX, y: e.screenY });
+});
+
+// ---- settings.json 增删改（只动 leek-fund 键，串行队列防并发写） ----
+function settingsPath() {
+  return path.join(process.env.APPDATA || '', 'Code', 'User', 'settings.json');
+}
+function readSettingsObj() {
+  const raw = fs.readFileSync(settingsPath(), 'utf8');
+  const stripped = raw
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+  return JSON.parse(stripped);
+}
+let writeQueue = Promise.resolve();
+function writeLeekConfig(mutator) {
+  writeQueue = writeQueue.then(() => {
+    const obj = readSettingsObj();
+    mutator(obj);
+    fs.writeFileSync(settingsPath(), JSON.stringify(obj, null, 2), 'utf8');
+    cfg.stocks = obj['leek-fund.stocks'] || [];
+    cfg.groups = obj['leek-fund.stockGroups'] || [];
+    cfg.groupStocks = obj['leek-fund.stockGroupStocks'] || [];
+  });
+  return writeQueue;
+}
+
+// ---- 添加面板（添加股票/添加分组共用输入行） ----
+const addPanel = document.getElementById('addPanel');
+const addInput = document.getElementById('addInput');
+const addResults = document.getElementById('addResults');
+let addMode = 'stock'; // 'stock' | 'group'
+let searchTimer = null;
+
+function openAddPanel(mode, placeholder) {
+  addMode = mode;
+  addInput.placeholder = placeholder;
+  addInput.value = '';
+  addResults.innerHTML = '';
+  addPanel.style.display = 'block';
+  addInput.focus();
+}
+function closeAddPanel() {
+  addPanel.style.display = 'none';
+  addInput.value = '';
+  addResults.innerHTML = '';
+}
+
+const SEARCH_URL = 'https://proxy.finance.qq.com/ifzqgtimg/appstock/smartbox/search/get';
+const ALLOWED_MARKETS = new Set(['sh', 'sz', 'bj', 'hk']);
+async function searchStocks(keyword) {
+  const resp = await axios.get(SEARCH_URL, { params: { q: keyword }, timeout: 5000 });
+  return (resp.data && resp.data.data && resp.data.data.stock || [])
+    .map((a) => ({ code: String(a[1]).toLowerCase(), name: a[2], market: String(a[0]).toLowerCase() }))
+    .filter((s) => ALLOWED_MARKETS.has(s.market));
+}
+
+function renderSearchResults(items) {
+  if (!items.length) {
+    addResults.innerHTML = '<div class="add-hint">无匹配结果</div>';
+    return;
+  }
+  addResults.innerHTML = items
+    .map(
+      (s) =>
+        `<div class="add-result" data-code="${s.code}"><span>${s.name}</span><span class="rcode">${s.market}${s.code.replace(/^(sh|sz|bj|hk)/, '')}</span></div>`
+    )
+    .join('');
+}
+
+addInput.addEventListener('input', () => {
+  if (addMode === 'group') return;
+  const keyword = addInput.value.trim();
+  clearTimeout(searchTimer);
+  if (!keyword) {
+    addResults.innerHTML = '';
+    return;
+  }
+  searchTimer = setTimeout(async () => {
+    try {
+      const items = await searchStocks(keyword);
+      renderSearchResults(items.slice(0, 8));
+    } catch (err) {
+      addResults.innerHTML = '<div class="add-hint">搜索失败</div>';
+    }
+  }, 300);
+});
+
+addInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeAddPanel();
+  } else if (e.key === 'Enter' && addMode === 'group') {
+    const name = addInput.value.trim();
+    if (!name) return;
+    writeLeekConfig((obj) => {
+      const groups = obj['leek-fund.stockGroups'] || [];
+      if (!groups.includes(name)) {
+        groups.push(name);
+        obj['leek-fund.stockGroups'] = groups;
+        const arrs = obj['leek-fund.stockGroupStocks'] || [];
+        arrs.push([]);
+        obj['leek-fund.stockGroupStocks'] = arrs;
+      }
+    }).then(() => {
+      closeAddPanel();
+      tick();
+    });
+  }
+});
+
+addResults.addEventListener('click', (e) => {
+  const item = e.target.closest('.add-result');
+  if (!item || !item.dataset.code) return;
+  const code = item.dataset.code;
+  writeLeekConfig((obj) => {
+    const stocks = obj['leek-fund.stocks'] || [];
+    if (!stocks.includes(code)) {
+      stocks.push(code);
+      obj['leek-fund.stocks'] = stocks;
+    }
+  }).then(() => {
+    closeAddPanel();
+    tick();
+  });
+});
+
+// ---- IPC：主进程菜单动作 ----
+ipcRenderer.on('menu-add-stock', () => openAddPanel('stock', '输入股票名称/代码搜索'));
+ipcRenderer.on('menu-add-group', () => openAddPanel('group', '输入分组名称，回车创建'));
+
+ipcRenderer.on('delete-stock', (_e, code) => {
+  writeLeekConfig((obj) => {
+    obj['leek-fund.stocks'] = (obj['leek-fund.stocks'] || []).filter((c) => c !== code);
+    obj['leek-fund.stockGroupStocks'] = (obj['leek-fund.stockGroupStocks'] || []).map((arr) =>
+      (arr || []).filter((c) => c !== code)
+    );
+  }).then(() => tick());
+});
+
+ipcRenderer.on('delete-group', (_e, name) => {
+  writeLeekConfig((obj) => {
+    const groups = obj['leek-fund.stockGroups'] || [];
+    const gi = groups.indexOf(name);
+    if (gi < 0) return;
+    const arrs = obj['leek-fund.stockGroupStocks'] || [];
+    const codes = arrs[gi] || [];
+    const inOtherGroups = new Set();
+    arrs.forEach((arr, i) => {
+      if (i !== gi) (arr || []).forEach((c) => inOtherGroups.add(c));
+    });
+    codes.forEach((c) => {
+      if (!inOtherGroups.has(c)) {
+        obj['leek-fund.stocks'] = (obj['leek-fund.stocks'] || []).filter((s) => s !== c);
+      }
+    });
+    groups.splice(gi, 1);
+    arrs.splice(gi, 1);
+    delete uiState.collapsed[name];
+    saveUIState();
+  }).then(() => tick());
 });
 
 tick();
