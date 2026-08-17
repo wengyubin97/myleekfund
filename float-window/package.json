@@ -1,11 +1,12 @@
 {
   "name": "leek-fund-float",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "韭菜盒子桌面悬浮窗：A股/港股实时行情、分组、分时图/K线",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "prepack": "node scripts/bump-version.js",
     "pack": "electron-builder --win portable"
   },
   "build": {
@@ -14,7 +15,8 @@
     "files": [
       "main.js",
       "renderer.js",
-      "index.html"
+      "index.html",
+      "build-version.json"
     ],
     "directories": {
       "output": "dist"

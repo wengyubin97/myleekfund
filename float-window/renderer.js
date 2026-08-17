@@ -31,6 +31,14 @@ function loadLeekConfig() {
 
 const cfg = loadLeekConfig();
 
+// 应用版本（打包时由 scripts/bump-version.js 生成，源码运行则无）
+let appVersion = '';
+try {
+  appVersion = (JSON.parse(fs.readFileSync(path.join(__dirname, 'build-version.json'), 'utf8')) || {}).version || '';
+} catch (err) {
+  appVersion = '';
+}
+
 // 界面状态（折叠分组/排序开关），localStorage 持久化
 const uiState = loadUIState();
 function loadUIState() {
@@ -164,7 +172,7 @@ function render(quotes) {
 
   const d = new Date();
   const pad = (n) => (n < 10 ? `0${n}` : n);
-  document.getElementById('updated').textContent = `更新 ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  document.getElementById('updated').textContent = `${appVersion ? `v${appVersion} · ` : ''}更新 ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 async function tick() {
