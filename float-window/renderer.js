@@ -41,6 +41,7 @@ function loadUIState() {
       pinned: s.pinned || [],
       groupSort: !!s.groupSort,
       stockSort: !!s.stockSort,
+      bw: !!s.bw,
     };
   } catch (err) {
     console.error('读取界面状态失败：', err.message);
@@ -508,6 +509,19 @@ addResults.addEventListener('click', (e) => {
 // ---- 标题栏按钮：添加股票 / 添加分组 ----
 document.getElementById('btnAddStock').addEventListener('click', () => openAddPanel('stock', '输入股票名称/代码搜索'));
 document.getElementById('btnAddGroup').addEventListener('click', () => openAddPanel('group', '输入分组名称，回车创建'));
+
+// 黑白/彩色模式切换（整窗灰度）
+const btnBw = document.getElementById('btnBw');
+function syncBw() {
+  document.body.classList.toggle('bw', uiState.bw);
+  btnBw.classList.toggle('active', uiState.bw);
+}
+btnBw.addEventListener('click', () => {
+  uiState.bw = !uiState.bw;
+  saveUIState();
+  syncBw();
+});
+syncBw();
 
 // ---- 图表视图（分时/日K/周K/月K） ----
 const chartView = document.getElementById('chartView');
