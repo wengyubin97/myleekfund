@@ -523,7 +523,6 @@ const chartCache = new Map(); // `${code}:${mode}` -> { time, data }
 
 const MINUTE_QUERY = 'https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=';
 const KLINE_QUERY = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=';
-const CHART_CACHE_TTL = 30000;
 const C_UP = '#ff8a87';
 const C_DOWN = '#7fd6a4';
 const C_AVG = '#f0c828';
@@ -536,7 +535,9 @@ const C_MA20 = '#c88fff';
 async function fetchChartData(code, mode) {
   const key = `${code}:${mode}`;
   const cached = chartCache.get(key);
-  if (cached && Date.now() - cached.time < CHART_CACHE_TTL) {
+  // 分时数据 5s 内保鲜（跟随轮询），K线 60s 缓存即可
+  const ttl = mode === 'minute' ? POLL_INTERVAL : 60000;
+  if (cached && Date.now() - cached.time < ttl) {
     return cached.data;
   }
   let data = null;
@@ -860,6 +861,11 @@ document.querySelectorAll('.chart-tab').forEach((t) => {
 window.addEventListener('resize', () => {
   if (chartCode) drawChart();
 });
+
+// 图表打开期间跟随轮询刷新（分时实时更新，K线走缓存重绘）
+setInterval(() => {
+  if (chartCode) drawChart();
+}, POLL_INTERVAL);
 
 tick();
 setInterval(tick, POLL_INTERVAL);
