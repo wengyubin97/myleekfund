@@ -547,13 +547,13 @@ const MINUTE_QUERY = 'https://web.ifzq.gtimg.cn/appstock/app/minute/query?code='
 const KLINE_QUERY = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=';
 const MKLINE_QUERY = 'https://proxy.finance.qq.com/ifzqgtimg/appstock/app/kline/mkline?param=';
 const MINUTE_K_PERIODS = new Set(['m1', 'm5', 'm15', 'm60', 'm120']);
-const C_UP = '#ff8a87';
-const C_DOWN = '#7fd6a4';
-const C_AVG = '#f0c828';
+const C_UP = '#f0c828'; // 涨=黄
+const C_DOWN = '#6fb1ff'; // 跌=蓝
+const C_AVG = '#e8e8e8'; // 均价线=白（与涨色区分）
 const C_GRID = 'rgba(255,255,255,0.10)';
 const C_TEXT = '#b8b8b8';
-const C_MA5 = '#ffd166';
-const C_MA10 = '#6fb1ff';
+const C_MA5 = '#ff9f43';
+const C_MA10 = '#4dd0e1';
 const C_MA20 = '#c88fff';
 
 async function fetchChartData(code, mode) {
