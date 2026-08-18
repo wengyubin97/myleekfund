@@ -547,6 +547,9 @@ let klineCount = 220; // K线默认显示根数（最新 N 根）
 let klineMax = 220; // 当前数据最大根数
 let minuteCount = 0; // 分时显示点数（0=全部），滚轮缩放
 let minuteMax = 0; // 分时当前数据总点数
+let lastChartData = null; // 最近一次拉取的图表数据（供十字坐标重绘）
+let lastGeom = null; // 最近一次绘制用到的几何信息（toX/toY/坐标域等）
+let chartHover = null; // { x, y } 鼠标位置（画布 CSS 像素）
 const chartCache = new Map(); // `${code}:${mode}` -> { time, data }
 
 const MINUTE_QUERY = 'https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=';
@@ -755,6 +758,28 @@ function drawMinute(ctx, w, h, data, total, prevVol) {
   });
 
   chartLegendEl.textContent = `显示 ${points.length}/${total} · 昨收 ${prevClose}  现价 ${points[points.length - 1].price.toFixed(2)}  ${lastPct >= 0 ? '+' : ''}${lastPct.toFixed(2)}%`;
+
+  lastGeom = {
+    mode: 'minute',
+    n: points.length,
+    padL,
+    padR,
+    padT,
+    chartH,
+    toX,
+    valueOfY: (y) => (midY - y) / scale,
+    infoLines: (i) => {
+      const p = points[i];
+      const pct = (p.price / prevClose - 1) * 100;
+      const t = p.time;
+      const v = vols[i] || 0;
+      const fmt = (x) => (x >= 10000 ? `${(x / 10000).toFixed(1)}万` : String(x));
+      return [
+        `${t.slice(0, 2)}:${t.slice(2, 4)}  价 ${p.price.toFixed(2)}  ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`,
+        `量 ${fmt(v)}`,
+      ];
+    },
+  };
 }
 
 function drawKline(ctx, w, h, bars, mode, total) {
@@ -844,6 +869,83 @@ function drawKline(ctx, w, h, bars, mode, total) {
   const last = bars[n - 1];
   const pct = (last.close / bars[n - 2].close - 1) * 100;
   chartLegendEl.textContent = `显示 ${bars.length}/${total} 根 · 开 ${last.open.toFixed(2)} 高 ${last.high.toFixed(2)} 低 ${last.low.toFixed(2)} 收 ${last.close.toFixed(2)}  ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+
+  lastGeom = {
+    mode,
+    n: bars.length,
+    padL,
+    padR,
+    padT,
+    chartH,
+    toX,
+    valueOfY: (y) => maxP - ((y - padT) / chartH) * (maxP - minP),
+    infoLines: (i) => {
+      const b = bars[i];
+      const pc = i > 0 ? bars[i - 1].close : b.open;
+      const bpct = (b.close / pc - 1) * 100;
+      const fmt = (x) => (x >= 10000 ? `${(x / 10000).toFixed(1)}万` : String(x));
+      const d = MINUTE_K_PERIODS.has(mode) ? `${b.date.slice(8, 10)}:${b.date.slice(10, 12)}` : b.date;
+      return [
+        `${d}`,
+        `开 ${b.open.toFixed(2)} 高 ${b.high.toFixed(2)}`,
+        `低 ${b.low.toFixed(2)} 收 ${b.close.toFixed(2)}  ${bpct >= 0 ? '+' : ''}${bpct.toFixed(2)}%`,
+        `量 ${fmt(b.volume)}`,
+      ];
+    },
+  };
+}
+
+/** 十字坐标轴（跟随鼠标，吸附最近的点，左侧标价 + 右上信息框） */
+function drawCrosshair(ctx, w, h) {
+  const g = lastGeom;
+  if (!g || !chartHover) return;
+  let i;
+  if (g.mode === 'minute') {
+    i = Math.round(((chartHover.x - g.padL) / Math.max(w - g.padL - g.padR, 1)) * (g.n - 1));
+  } else {
+    const bw = (w - g.padL - g.padR) / g.n;
+    i = Math.floor((chartHover.x - g.padL) / Math.max(bw, 1));
+  }
+  i = Math.max(0, Math.min(g.n - 1, i));
+  const cx = g.toX(i);
+  const yTop = g.padT;
+  const yBot = g.padT + g.chartH;
+  const cy = Math.min(Math.max(chartHover.y, yTop), yBot);
+
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(cx, yTop);
+  ctx.lineTo(cx, yBot);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(g.padL, cy);
+  ctx.lineTo(w - g.padR, cy);
+  ctx.stroke();
+  ctx.restore();
+
+  // 左侧价格标注
+  const price = g.valueOfY(cy);
+  const label = g.mode === 'minute' ? `${price >= 0 ? '+' : ''}${price.toFixed(2)}%` : price.toFixed(2);
+  const lw = label.length * 7;
+  ctx.fillStyle = 'rgba(16,16,20,0.85)';
+  ctx.fillRect(0, cy - 7, lw + 8, 14);
+  ctx.fillStyle = '#e8e8e8';
+  ctx.fillText(label, 4, cy + 3);
+
+  // 右上信息框
+  const lines = g.infoLines(i);
+  const lineH = 13;
+  const boxW = 155;
+  const boxH = lines.length * lineH + 8;
+  const bx = Math.max(2, w - boxW - 4);
+  const by = yTop + 4;
+  ctx.fillStyle = 'rgba(16,16,20,0.88)';
+  ctx.fillRect(bx, by, boxW, boxH);
+  ctx.fillStyle = '#e8e8e8';
+  lines.forEach((ln, li) => ctx.fillText(ln, bx + 4, by + 4 + (li + 1) * lineH));
 }
 
 async function drawChart() {
@@ -855,18 +957,29 @@ async function drawChart() {
     data = await fetchChartData(code, mode);
   } catch (err) {
     console.error('图表数据拉取失败：', err.message);
+    lastChartData = null;
     const { ctx, w } = setupCanvas();
     ctx.fillStyle = C_TEXT;
     ctx.fillText('数据拉取失败', 10, 20);
     return;
   }
   if (chartCode !== code || chartMode !== mode) return;
-  const { ctx, w, h } = setupCanvas();
   if (!data || (mode === 'minute' && (!data.points || !data.points.length)) || (mode !== 'minute' && !data.length)) {
+    lastChartData = null;
+    const { ctx, w } = setupCanvas();
     ctx.fillStyle = C_TEXT;
     ctx.fillText('暂无数据', 10, 20);
     return;
   }
+  lastChartData = data;
+  renderChart();
+}
+
+function renderChart() {
+  if (!chartCode || !lastChartData) return;
+  const { ctx, w, h } = setupCanvas();
+  const mode = chartMode;
+  const data = lastChartData;
   if (mode === 'minute') {
     minuteMax = data.points.length;
     if (minuteCount === 0 || minuteCount > minuteMax) minuteCount = minuteMax;
@@ -879,6 +992,7 @@ async function drawChart() {
     if (klineCount > klineMax) klineCount = klineMax;
     drawKline(ctx, w, h, data.slice(-klineCount), mode, data.length);
   }
+  drawCrosshair(ctx, w, h);
 }
 
 function syncChartTabs() {
@@ -913,6 +1027,19 @@ document.getElementById('chartPeriod').addEventListener('change', (e) => {
 });
 window.addEventListener('resize', () => {
   if (chartCode) drawChart();
+});
+
+// 十字坐标轴：鼠标移动/离开
+chartCanvas.addEventListener('mousemove', (e) => {
+  const rect = chartCanvas.getBoundingClientRect();
+  chartHover = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  if (lastChartData && chartCode) renderChart();
+});
+chartCanvas.addEventListener('mouseleave', () => {
+  if (chartHover) {
+    chartHover = null;
+    if (lastChartData && chartCode) renderChart();
+  }
 });
 
 // 图表打开期间跟随轮询刷新（分时实时更新，K线走缓存重绘）
