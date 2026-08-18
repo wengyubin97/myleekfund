@@ -545,6 +545,8 @@ const chartCache = new Map(); // `${code}:${mode}` -> { time, data }
 
 const MINUTE_QUERY = 'https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=';
 const KLINE_QUERY = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=';
+const MKLINE_QUERY = 'https://proxy.finance.qq.com/ifzqgtimg/appstock/app/kline/mkline?param=';
+const MINUTE_K_PERIODS = new Set(['m1', 'm5', 'm15', 'm60', 'm120']);
 const C_UP = '#ff8a87';
 const C_DOWN = '#7fd6a4';
 const C_AVG = '#f0c828';
@@ -557,8 +559,11 @@ const C_MA20 = '#c88fff';
 async function fetchChartData(code, mode) {
   const key = `${code}:${mode}`;
   const cached = chartCache.get(key);
-  // 分时数据 5s 内保鲜（跟随轮询），K线 60s 缓存即可
-  const ttl = mode === 'minute' ? POLL_INTERVAL : 60000;
+  // 缓存保鲜：分时 5s、1分钟K 15s、5/15分钟K 30s、其余 60s
+  const ttl =
+    mode === 'minute' ? POLL_INTERVAL :
+    mode === 'm1' ? 15000 :
+    mode === 'm5' || mode === 'm15' ? 30000 : 60000;
   if (cached && Date.now() - cached.time < ttl) {
     return cached.data;
   }
@@ -588,6 +593,24 @@ async function fetchChartData(code, mode) {
       }
     });
     data = { prevClose, points };
+  } else if (MINUTE_K_PERIODS.has(mode)) {
+    // 分钟K线走 mkline 端点（最多 320 根）
+    const resp = await axios.get(`${MKLINE_QUERY}${code},${mode},,320`, {
+      timeout: 8000,
+      headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://gu.qq.com/' },
+    });
+    const stock = resp.data && resp.data.data && resp.data.data[code];
+    const rows = (stock && (stock[mode] || stock[`qfq${mode}`])) || [];
+    data = rows
+      .map((r) => ({
+        date: r[0],
+        open: parseFloat(r[1]),
+        close: parseFloat(r[2]),
+        high: parseFloat(r[3]),
+        low: parseFloat(r[4]),
+        volume: parseFloat(r[5]) || 0,
+      }))
+      .filter((k) => !isNaN(k.close) && k.close > 0);
   } else {
     const resp = await axios.get(`${KLINE_QUERY}${code},${mode},,,320,qfq`, {
       timeout: 8000,
@@ -803,10 +826,12 @@ function drawKline(ctx, w, h, bars, mode, total) {
     ctx.globalAlpha = 1;
   });
 
-  // 时间轴：均匀取 5 个日期
+  // 时间轴：均匀取 5 个标签（分钟K显示时分，日/周/月K显示日期）
   ctx.fillStyle = C_TEXT;
+  const xLabel = (d) =>
+    MINUTE_K_PERIODS.has(mode) ? `${d.slice(8, 10)}:${d.slice(10, 12)}` : d.slice(2);
   [0, Math.floor(n / 4), Math.floor(n / 2), Math.floor((3 * n) / 4), n - 1].forEach((i) => {
-    ctx.fillText(bars[i].date.slice(2), toX(i) - 12, h - 6);
+    ctx.fillText(xLabel(bars[i].date), toX(i) - 12, h - 6);
   });
 
   // 图例：最新一根 OHLC + 显示根数
@@ -846,9 +871,7 @@ async function drawChart() {
 }
 
 function syncChartTabs() {
-  document.querySelectorAll('.chart-tab').forEach((t) => {
-    t.classList.toggle('active', t.dataset.mode === chartMode);
-  });
+  document.getElementById('chartPeriod').value = chartMode;
 }
 
 function openChart(code, name) {
@@ -872,13 +895,10 @@ function closeChart() {
 }
 
 document.getElementById('chartBack').addEventListener('click', closeChart);
-document.querySelectorAll('.chart-tab').forEach((t) => {
-  t.addEventListener('click', () => {
-    if (!chartCode) return;
-    chartMode = t.dataset.mode;
-    syncChartTabs();
-    drawChart();
-  });
+document.getElementById('chartPeriod').addEventListener('change', (e) => {
+  if (!chartCode) return;
+  chartMode = e.target.value;
+  drawChart();
 });
 window.addEventListener('resize', () => {
   if (chartCode) drawChart();

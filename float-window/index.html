@@ -77,6 +77,15 @@
     #chartLegend { margin-left: auto; font-size: 11px; color: #b8b8b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .chart-tabs { display: flex; flex: none; }
     .chart-tabs .chart-tab.active { color: #43a047; font-weight: 700; }
+    #chartPeriod {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 4px;
+      color: #e8e8e8;
+      font-size: 11px;
+      padding: 1px 2px;
+      outline: none;
+    }
     #chartCanvas { flex: 1; width: 100%; min-height: 0; display: block; }
     #addPanel { flex: none; display: none; padding: 4px 8px; border-bottom: 1px solid rgba(255,255,255,0.08); }
     #addPanel input {
@@ -204,10 +213,17 @@
         <span id="chartTitle">--</span>
         <span id="chartLegend"></span>
         <span class="chart-tabs">
-          <button class="chart-tab active" data-mode="minute">分时</button>
-          <button class="chart-tab" data-mode="day">日K</button>
-          <button class="chart-tab" data-mode="week">周K</button>
-          <button class="chart-tab" data-mode="month">月K</button>
+          <select id="chartPeriod">
+            <option value="minute">分时</option>
+            <option value="m1">1分钟</option>
+            <option value="m5">5分钟</option>
+            <option value="m15">15分钟</option>
+            <option value="m60">60分钟</option>
+            <option value="m120">120分钟</option>
+            <option value="day">日K</option>
+            <option value="week">周K</option>
+            <option value="month">月K</option>
+          </select>
         </span>
       </div>
       <canvas id="chartCanvas"></canvas>
