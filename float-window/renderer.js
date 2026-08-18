@@ -353,11 +353,15 @@ document.getElementById('opacitySlider').addEventListener('input', (e) => {
   ipcRenderer.send('win-opacity', Number(e.target.value) / 100);
 });
 
-// 滚轮：K线图视图下缩放时间周期（上滚放大/下滚缩小，始终显示最新 N 根）
+// 滚轮：图表视图下缩放时间周期（分时缩到最近 N 分钟 / K线缩到最近 N 根，上滚放大/下滚缩小）
 document.addEventListener('wheel', (e) => {
-  if (!chartCode || chartMode === 'minute') return;
+  if (!chartCode) return;
   const delta = e.deltaY > 0 ? 10 : -10;
-  klineCount = Math.min(klineMax, Math.max(10, klineCount + delta));
+  if (chartMode === 'minute') {
+    minuteCount = Math.min(minuteMax, Math.max(10, minuteCount + delta));
+  } else {
+    klineCount = Math.min(klineMax, Math.max(10, klineCount + delta));
+  }
   drawChart();
 }, { passive: true });
 
@@ -541,6 +545,8 @@ let chartName = '';
 let chartMode = 'minute';
 let klineCount = 220; // K线默认显示根数（最新 N 根）
 let klineMax = 220; // 当前数据最大根数
+let minuteCount = 0; // 分时显示点数（0=全部），滚轮缩放
+let minuteMax = 0; // 分时当前数据总点数
 const chartCache = new Map(); // `${code}:${mode}` -> { time, data }
 
 const MINUTE_QUERY = 'https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=';
@@ -655,7 +661,7 @@ function calcLotFactor(points) {
   return 0;
 }
 
-function drawMinute(ctx, w, h, data) {
+function drawMinute(ctx, w, h, data, total, prevVol) {
   const { prevClose, points } = data;
   const padL = 10;
   const padR = 10;
@@ -721,10 +727,10 @@ function drawMinute(ctx, w, h, data) {
   ctx.fillText(`MIN ${minPct >= 0 ? '+' : ''}${minPct.toFixed(2)}%`, padL, Math.min(h - volH - 12, toY(minPct) + 10));
   ctx.fillText('0', padL, Math.min(h - volH - 12, midY + 10));
 
-  // 分时量柱（差分，红涨绿跌）
+  // 分时量柱（差分，黄涨蓝跌）
   const volBase = h - 18;
   const vols = [];
-  let prev = 0;
+  let prev = prevVol || 0;
   points.forEach((p) => {
     const v = p.volume - prev;
     prev = p.volume;
@@ -748,7 +754,7 @@ function drawMinute(ctx, w, h, data) {
     ctx.fillText(`${t.slice(0, 2)}:${t.slice(2, 4)}`, toX(i) - 12, h - 6);
   });
 
-  chartLegendEl.textContent = `昨收 ${prevClose}  现价 ${points[points.length - 1].price.toFixed(2)}  ${lastPct >= 0 ? '+' : ''}${lastPct.toFixed(2)}%`;
+  chartLegendEl.textContent = `显示 ${points.length}/${total} · 昨收 ${prevClose}  现价 ${points[points.length - 1].price.toFixed(2)}  ${lastPct >= 0 ? '+' : ''}${lastPct.toFixed(2)}%`;
 }
 
 function drawKline(ctx, w, h, bars, mode, total) {
@@ -862,7 +868,12 @@ async function drawChart() {
     return;
   }
   if (mode === 'minute') {
-    drawMinute(ctx, w, h, data);
+    minuteMax = data.points.length;
+    if (minuteCount === 0 || minuteCount > minuteMax) minuteCount = minuteMax;
+    const startIdx = Math.max(0, data.points.length - minuteCount);
+    const prevVol = startIdx > 0 ? data.points[startIdx - 1].volume || 0 : 0;
+    const visible = data.points.slice(startIdx);
+    drawMinute(ctx, w, h, { prevClose: data.prevClose, points: visible }, data.points.length, prevVol);
   } else {
     klineMax = data.length;
     if (klineCount > klineMax) klineCount = klineMax;
