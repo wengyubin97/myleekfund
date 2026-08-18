@@ -91,6 +91,18 @@
       color: #b8b8b8;
     }
     #chartCanvas { flex: 1; width: 100%; min-height: 0; display: block; }
+    #chartInfo {
+      flex: none;
+      height: 16px;
+      font-size: 10px;
+      color: #9a9a9a;
+      line-height: 16px;
+      padding: 0 8px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
     #addPanel { flex: none; display: none; padding: 4px 8px; border-bottom: 1px solid rgba(255,255,255,0.08); }
     #addPanel input {
       width: 100%;
@@ -231,6 +243,7 @@
         </span>
       </div>
       <canvas id="chartCanvas"></canvas>
+      <div id="chartInfo"></div>
     </div>
     <div id="addPanel">
       <input id="addInput" type="text" placeholder="输入股票名称/代码搜索" autocomplete="off" spellcheck="false" />

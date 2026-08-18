@@ -540,6 +540,7 @@ const chartView = document.getElementById('chartView');
 const chartCanvas = document.getElementById('chartCanvas');
 const chartTitleEl = document.getElementById('chartTitle');
 const chartLegendEl = document.getElementById('chartLegend');
+const chartInfoEl = document.getElementById('chartInfo');
 let chartCode = null;
 let chartName = '';
 let chartMode = 'minute';
@@ -895,10 +896,13 @@ function drawKline(ctx, w, h, bars, mode, total) {
   };
 }
 
-/** 十字坐标轴（跟随鼠标，吸附最近的点，左侧标价 + 右上信息框） */
+/** 十字坐标轴（跟随鼠标，吸附最近的点，左侧标价 + 底部坐标栏显示数据） */
 function drawCrosshair(ctx, w, h) {
   const g = lastGeom;
-  if (!g || !chartHover) return;
+  if (!g || !chartHover) {
+    chartInfoEl.textContent = '';
+    return;
+  }
   let i;
   if (g.mode === 'minute') {
     i = Math.round(((chartHover.x - g.padL) / Math.max(w - g.padL - g.padR, 1)) * (g.n - 1));
@@ -926,7 +930,7 @@ function drawCrosshair(ctx, w, h) {
   ctx.stroke();
   ctx.restore();
 
-  // 左侧价格标注
+  // 左侧价格标注（在坐标留白区，不遮挡图像）
   const price = g.valueOfY(cy);
   const label = g.mode === 'minute' ? `${price >= 0 ? '+' : ''}${price.toFixed(2)}%` : price.toFixed(2);
   const lw = label.length * 7;
@@ -935,17 +939,8 @@ function drawCrosshair(ctx, w, h) {
   ctx.fillStyle = '#e8e8e8';
   ctx.fillText(label, 4, cy + 3);
 
-  // 右上信息框
-  const lines = g.infoLines(i);
-  const lineH = 13;
-  const boxW = 155;
-  const boxH = lines.length * lineH + 8;
-  const bx = Math.max(2, w - boxW - 4);
-  const by = yTop + 4;
-  ctx.fillStyle = 'rgba(16,16,20,0.88)';
-  ctx.fillRect(bx, by, boxW, boxH);
-  ctx.fillStyle = '#e8e8e8';
-  lines.forEach((ln, li) => ctx.fillText(ln, bx + 4, by + 4 + (li + 1) * lineH));
+  // 底部坐标栏显示当前点数据
+  chartInfoEl.textContent = g.infoLines(i).join(' ');
 }
 
 async function drawChart() {
@@ -1016,6 +1011,8 @@ function closeChart() {
   chartView.classList.remove('show');
   document.getElementById('list').style.display = '';
   chartCode = null;
+  chartHover = null;
+  chartInfoEl.textContent = '';
   if (lastQuotes) render(lastQuotes);
 }
 
