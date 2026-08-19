@@ -795,6 +795,7 @@ function drawKline(ctx, w, h, bars, mode, total) {
   const volH = Math.round(h * 0.16);
   const chartH = h - padT - volH - 24;
   const n = bars.length;
+  if (!n) return;
   const bw = (w - padL - padR) / n;
   const maxP = Math.max(...bars.map((b) => b.high));
   const minP = Math.min(...bars.map((b) => b.low));
@@ -873,7 +874,7 @@ function drawKline(ctx, w, h, bars, mode, total) {
 
   // 图例：最新一根 OHLC + 显示根数
   const last = bars[n - 1];
-  const pct = (last.close / bars[n - 2].close - 1) * 100;
+  const pct = n > 1 ? (last.close / bars[n - 2].close - 1) * 100 : 0;
   chartLegendEl.textContent = `显示 ${bars.length}/${total} 根 · 开 ${last.open.toFixed(2)} 高 ${last.high.toFixed(2)} 低 ${last.low.toFixed(2)} 收 ${last.close.toFixed(2)}  ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
 
   lastGeom = {
@@ -980,6 +981,12 @@ function renderChart() {
   const { ctx, w, h } = setupCanvas();
   const mode = chartMode;
   const data = lastChartData;
+  // 数据与当前周期类型不匹配（切换/打开期间的陈旧数据）→ 不绘制，避免崩溃
+  if (mode === 'minute') {
+    if (!data.points || !data.points.length) return;
+  } else {
+    if (!Array.isArray(data) || !data.length) return;
+  }
   if (mode === 'minute') {
     minuteMax = data.points.length;
     if (minuteCount === 0 || minuteCount > minuteMax) minuteCount = minuteMax;
@@ -1013,6 +1020,8 @@ function openChart(code, name) {
   klineOffset = 0;
   chartHover = null;
   dragState = null;
+  lastChartData = null;
+  chartInfoEl.textContent = '';
   syncChartTabs();
   document.getElementById('addPanel').style.display = 'none';
   document.getElementById('confirmBar').style.display = 'none';
@@ -1034,6 +1043,7 @@ document.getElementById('chartBack').addEventListener('click', closeChart);
 document.getElementById('chartPeriod').addEventListener('change', (e) => {
   if (!chartCode) return;
   chartMode = e.target.value;
+  lastChartData = null;
   drawChart();
 });
 window.addEventListener('resize', () => {
