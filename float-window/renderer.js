@@ -359,8 +359,10 @@ document.addEventListener('wheel', (e) => {
   const delta = e.deltaY > 0 ? 10 : -10;
   if (chartMode === 'minute') {
     minuteCount = Math.min(minuteMax, Math.max(10, minuteCount + delta));
+    minuteOffset = Math.min(minuteOffset, Math.max(0, minuteMax - minuteCount));
   } else {
     klineCount = Math.min(klineMax, Math.max(10, klineCount + delta));
+    klineOffset = Math.min(klineOffset, Math.max(0, klineMax - klineCount));
   }
   drawChart();
 }, { passive: true });
@@ -548,6 +550,9 @@ let klineCount = 220; // K线默认显示根数（最新 N 根）
 let klineMax = 220; // 当前数据最大根数
 let minuteCount = 0; // 分时显示点数（0=全部），滚轮缩放
 let minuteMax = 0; // 分时当前数据总点数
+let minuteOffset = 0; // 分时平移：距最新数据的偏移点数（0=最新）
+let klineOffset = 0; // K线平移：距最新数据的偏移根数（0=最新）
+let dragState = null; // 拖拽平移状态 { startX, minuteOffset, klineOffset }
 let lastChartData = null; // 最近一次拉取的图表数据（供十字坐标重绘）
 let lastGeom = null; // 最近一次绘制用到的几何信息（toX/toY/坐标域等）
 let chartHover = null; // { x, y } 鼠标位置（画布 CSS 像素）
@@ -978,14 +983,19 @@ function renderChart() {
   if (mode === 'minute') {
     minuteMax = data.points.length;
     if (minuteCount === 0 || minuteCount > minuteMax) minuteCount = minuteMax;
-    const startIdx = Math.max(0, data.points.length - minuteCount);
-    const prevVol = startIdx > 0 ? data.points[startIdx - 1].volume || 0 : 0;
-    const visible = data.points.slice(startIdx);
+    minuteOffset = Math.min(minuteOffset, Math.max(0, minuteMax - minuteCount));
+    const end = data.points.length - minuteOffset;
+    const start = Math.max(0, end - minuteCount);
+    const prevVol = start > 0 ? data.points[start - 1].volume || 0 : 0;
+    const visible = data.points.slice(start, end);
     drawMinute(ctx, w, h, { prevClose: data.prevClose, points: visible }, data.points.length, prevVol);
   } else {
     klineMax = data.length;
     if (klineCount > klineMax) klineCount = klineMax;
-    drawKline(ctx, w, h, data.slice(-klineCount), mode, data.length);
+    klineOffset = Math.min(klineOffset, Math.max(0, klineMax - klineCount));
+    const end = data.length - klineOffset;
+    const start = Math.max(0, end - klineCount);
+    drawKline(ctx, w, h, data.slice(start, end), mode, data.length);
   }
   drawCrosshair(ctx, w, h);
 }
@@ -999,6 +1009,10 @@ function openChart(code, name) {
   chartName = name;
   chartTitleEl.textContent = `${name} ${code}`;
   chartMode = 'minute';
+  minuteOffset = 0;
+  klineOffset = 0;
+  chartHover = null;
+  dragState = null;
   syncChartTabs();
   document.getElementById('addPanel').style.display = 'none';
   document.getElementById('confirmBar').style.display = 'none';
@@ -1026,14 +1040,49 @@ window.addEventListener('resize', () => {
   if (chartCode) drawChart();
 });
 
-// 十字坐标轴：鼠标移动/离开
-chartCanvas.addEventListener('mousemove', (e) => {
+// 十字坐标轴 + 拖拽平移：pointerdown 记录起点，拖动按像素换算平移量，松开结束
+chartCanvas.addEventListener('pointerdown', (e) => {
+  dragState = {
+    startX: e.clientX,
+    minuteOffset,
+    klineOffset,
+  };
+  chartCanvas.setPointerCapture(e.pointerId);
+});
+chartCanvas.addEventListener('pointermove', (e) => {
+  if (!dragState) {
+    const rect = chartCanvas.getBoundingClientRect();
+    chartHover = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    if (lastChartData && chartCode) renderChart();
+    return;
+  }
+  const g = lastGeom;
+  if (!g) return;
   const rect = chartCanvas.getBoundingClientRect();
-  chartHover = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  const chartW = Math.max(rect.width - g.padL - g.padR, 1);
+  const pxPerBar = chartW / (g.mode === 'minute' ? Math.max(g.n - 1, 1) : g.n);
+  const dx = e.clientX - dragState.startX;
+  const delta = Math.round(dx / pxPerBar);
+  if (g.mode === 'minute') {
+    minuteOffset = Math.max(0, Math.min(Math.max(0, minuteMax - minuteCount), dragState.minuteOffset + delta));
+  } else {
+    klineOffset = Math.max(0, Math.min(Math.max(0, klineMax - klineCount), dragState.klineOffset + delta));
+  }
   if (lastChartData && chartCode) renderChart();
 });
-chartCanvas.addEventListener('mouseleave', () => {
-  if (chartHover) {
+const endDrag = (e) => {
+  if (!dragState) return;
+  dragState = null;
+  try {
+    chartCanvas.releasePointerCapture(e.pointerId);
+  } catch (err) {
+    /* ignore */
+  }
+};
+chartCanvas.addEventListener('pointerup', endDrag);
+chartCanvas.addEventListener('pointercancel', endDrag);
+chartCanvas.addEventListener('pointerleave', () => {
+  if (!dragState && chartHover) {
     chartHover = null;
     if (lastChartData && chartCode) renderChart();
   }
