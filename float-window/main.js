@@ -80,6 +80,16 @@ ipcMain.on('win-opacity', (_event, value) => {
   }
 });
 
+// 股票搜索（走主进程 Node http，绕过 renderer 的 CORS 限制）
+const searchAxios = require('axios');
+ipcMain.handle('search-stocks', async (_event, keyword) => {
+  const resp = await searchAxios.get('https://proxy.finance.qq.com/ifzqgtimg/appstock/smartbox/search/get', {
+    params: { q: keyword },
+    timeout: 8000,
+  });
+  return (resp.data && resp.data.data && resp.data.data.stock) || [];
+});
+
 app.whenReady().then(() => {
   createWindow();
   createTray();

@@ -414,11 +414,11 @@ function closeAddPanel() {
   addResults.innerHTML = '';
 }
 
-const SEARCH_URL = 'https://proxy.finance.qq.com/ifzqgtimg/appstock/smartbox/search/get';
 const ALLOWED_MARKETS = new Set(['sh', 'sz', 'bj', 'hk']);
 async function searchStocks(keyword) {
-  const resp = await axios.get(SEARCH_URL, { params: { q: keyword }, timeout: 5000 });
-  return (resp.data && resp.data.data && resp.data.data.stock || [])
+  // 搜索走主进程 IPC（renderer 的 XHR 受 CORS 限制，proxy.finance.qq.com 会 Network Error）
+  const stockArr = await ipcRenderer.invoke('search-stocks', keyword);
+  return stockArr
     .map((a) => ({
       // smartbox 的 a[1] 是裸代码（如 601288），必须拼上市场前缀（如 sh601288）才能用于行情接口
       code: String(a[0]).toLowerCase() + String(a[1]).toLowerCase(),
