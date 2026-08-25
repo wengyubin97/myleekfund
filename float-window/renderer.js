@@ -122,7 +122,7 @@ function render(quotes) {
     name: gname,
     members: quotes.filter((q) => (cfg.groupStocks[gi] || []).includes(q.code)),
   }));
-  groups = groups.filter((g) => g.members.length);
+  // 不过滤空分组（新建的空分组也需要显示，方便用户添加股票）
   groups.forEach((g) => g.members.forEach((m) => grouped.add(m.code)));
   // 置顶分组恒在首位（按置顶顺序），其余分组可排序
   const pinned = groups.filter((g) => uiState.pinned.includes(g.name));
