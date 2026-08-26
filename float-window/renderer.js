@@ -111,19 +111,11 @@ function clsOf(percent) {
 }
 
 async function fetchQuotes(codes) {
-  const resp = await axios.get(QUOTE_URL, {
-    responseType: 'arraybuffer',
-    params: { q: codes.join(','), fmt: 'json' },
-    transformResponse: [(data) => {
-      // Electron 的 XHR adapter 返回 ArrayBuffer（无 .length），iconv-lite 解码前需转 Buffer
-      const buf = data instanceof ArrayBuffer ? Buffer.from(data) : data;
-      return JSON.parse(decode(buf, 'GBK'));
-    }],
-    timeout: 8000,
-    headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://gu.qq.com/' },
-  });
+  // 行情走主进程 IPC（renderer XHR 受 CORS 限制，qt.gtimg.cn 会 Network Error）
+  const buf = await ipcRenderer.invoke('fetch-quotes', codes);
+  const data = JSON.parse(decode(Buffer.from(buf), 'GBK'));
   return codes.map((code) => {
-    const arr = resp.data[code.toLowerCase()];
+    const arr = data[code.toLowerCase()];
     if (!arr) return null;
     const price = parseFloat(arr[3]);
     const yestclose = parseFloat(arr[4]);

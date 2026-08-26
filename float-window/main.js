@@ -90,6 +90,17 @@ ipcMain.handle('search-stocks', async (_event, keyword) => {
   return (resp.data && resp.data.data && resp.data.data.stock) || [];
 });
 
+// 腾讯行情（走主进程 Node http，绕过 renderer 的 CORS/Network Error）
+ipcMain.handle('fetch-quotes', async (_event, codes) => {
+  const resp = await searchAxios.get('http://qt.gtimg.cn/q=', {
+    responseType: 'arraybuffer',
+    params: { q: codes.join(','), fmt: 'json' },
+    timeout: 8000,
+    headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://gu.qq.com/' },
+  });
+  return resp.data; // Buffer
+});
+
 app.whenReady().then(() => {
   createWindow();
   createTray();
