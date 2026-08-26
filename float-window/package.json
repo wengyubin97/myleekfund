@@ -1,6 +1,6 @@
 {
   "name": "leek-fund-float",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "private": true,
   "description": "韭菜盒子桌面悬浮窗：A股/港股实时行情、分组、分时图/K线",
   "main": "main.js",
