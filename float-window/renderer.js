@@ -11,20 +11,47 @@ const DOWN_COLOR_CLS = 'down';
 
 /** 读 VSCode settings.json（容忍 JSONC 注释） */
 function loadLeekConfig() {
-  const file = path.join(process.env.APPDATA || '', 'Code', 'User', 'settings.json');
+  // 优先读本地 config.json（独立运行模式）
+  const localPath = path.join(__dirname, 'config.json');
   try {
-    const raw = fs.readFileSync(file, 'utf8');
+    const raw = fs.readFileSync(localPath, 'utf8');
+    const cfg = JSON.parse(raw);
+    if (cfg.stocks || cfg.groups) {
+      return {
+        stocks: cfg.stocks || [],
+        groups: cfg.groups || [],
+        groupStocks: cfg.groupStocks || [],
+      };
+    }
+  } catch (err) {
+    // 本地配置不存在，尝试从 VSCode settings.json 导入
+  }
+
+  // 从 VSCode settings.json 导入（首次启动或无本地配置时）
+  const vscodePath = path.join(process.env.APPDATA || '', 'Code', 'User', 'settings.json');
+  try {
+    const raw = fs.readFileSync(vscodePath, 'utf8');
     const stripped = raw
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/(^|[^:])\/\/.*$/gm, '$1');
     const cfg = JSON.parse(stripped);
-    return {
+    const result = {
       stocks: cfg['leek-fund.stocks'] || [],
       groups: cfg['leek-fund.stockGroups'] || [],
       groupStocks: cfg['leek-fund.stockGroupStocks'] || [],
     };
+    // 导入成功后保存到本地 config.json
+    if (result.stocks.length || result.groups.length) {
+      try {
+        fs.writeFileSync(localPath, JSON.stringify(result, null, 2), 'utf8');
+        console.log('已从 VSCode settings.json 导入配置到本地 config.json');
+      } catch (err) {
+        console.error('导入配置失败：', err.message);
+      }
+    }
+    return result;
   } catch (err) {
-    console.error('读取 settings.json 失败：', err.message);
+    console.error('读取配置失败：', err.message);
     return { stocks: [], groups: [], groupStocks: [] };
   }
 }
@@ -166,7 +193,7 @@ function render(quotes) {
     }
   }
   if (!quotes.length) {
-    html = `<div class="group-row">无自选股（请在 VSCode settings.json 配置 leek-fund.stocks）</div>`;
+    html = `<div class="group-row">无自选股（点击 +股 添加股票）</div>`;
   }
   listEl.innerHTML = html;
 
@@ -291,8 +318,8 @@ document.addEventListener('keydown', (e) => {
 
 function deleteStock(code) {
   writeLeekConfig((obj) => {
-    obj['leek-fund.stocks'] = (obj['leek-fund.stocks'] || []).filter((c) => c !== code);
-    obj['leek-fund.stockGroupStocks'] = (obj['leek-fund.stockGroupStocks'] || []).map((arr) =>
+    obj.stocks = (obj.stocks || []).filter((c) => c !== code);
+    obj.groupStocks = (obj.groupStocks || []).map((arr) =>
       (arr || []).filter((c) => c !== code)
     );
   }).then(() => tick());
@@ -300,20 +327,20 @@ function deleteStock(code) {
 
 function removeStockFromGroup(code, groupName) {
   writeLeekConfig((obj) => {
-    const groups = obj['leek-fund.stockGroups'] || [];
+    const groups = obj.groups || [];
     const gi = groups.indexOf(groupName);
     if (gi < 0) return;
-    const arrs = obj['leek-fund.stockGroupStocks'] || [];
+    const arrs = obj.groupStocks || [];
     arrs[gi] = (arrs[gi] || []).filter((c) => c !== code);
   }).then(() => tick());
 }
 
 function deleteGroup(name) {
   writeLeekConfig((obj) => {
-    const groups = obj['leek-fund.stockGroups'] || [];
+    const groups = obj.groups || [];
     const gi = groups.indexOf(name);
     if (gi < 0) return;
-    const arrs = obj['leek-fund.stockGroupStocks'] || [];
+    const arrs = obj.groupStocks || [];
     const codes = arrs[gi] || [];
     const inOtherGroups = new Set();
     arrs.forEach((arr, i) => {
@@ -321,7 +348,7 @@ function deleteGroup(name) {
     });
     codes.forEach((c) => {
       if (!inOtherGroups.has(c)) {
-        obj['leek-fund.stocks'] = (obj['leek-fund.stocks'] || []).filter((s) => s !== c);
+        obj.stocks = (obj.stocks || []).filter((s) => s !== c);
       }
     });
     groups.splice(gi, 1);
@@ -367,26 +394,23 @@ document.addEventListener('wheel', (e) => {
   drawChart();
 }, { passive: true });
 
-// ---- settings.json 增删改（只动 leek-fund 键，串行队列防并发写） ----
-function settingsPath() {
-  return path.join(process.env.APPDATA || '', 'Code', 'User', 'settings.json');
+// ---- 配置增删改（本地 config.json，串行队列防并发写） ----
+function configPath() {
+  return path.join(__dirname, 'config.json');
 }
-function readSettingsObj() {
-  const raw = fs.readFileSync(settingsPath(), 'utf8');
-  const stripped = raw
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1');
-  return JSON.parse(stripped);
+function readConfigObj() {
+  const raw = fs.readFileSync(configPath(), 'utf8');
+  return JSON.parse(raw);
 }
 let writeQueue = Promise.resolve();
 function writeLeekConfig(mutator) {
   writeQueue = writeQueue.then(() => {
-    const obj = readSettingsObj();
+    const obj = readConfigObj();
     mutator(obj);
-    fs.writeFileSync(settingsPath(), JSON.stringify(obj, null, 2), 'utf8');
-    cfg.stocks = obj['leek-fund.stocks'] || [];
-    cfg.groups = obj['leek-fund.stockGroups'] || [];
-    cfg.groupStocks = obj['leek-fund.stockGroupStocks'] || [];
+    fs.writeFileSync(configPath(), JSON.stringify(obj, null, 2), 'utf8');
+    cfg.stocks = obj.stocks || [];
+    cfg.groups = obj.groups || [];
+    cfg.groupStocks = obj.groupStocks || [];
   });
   return writeQueue;
 }
@@ -466,13 +490,13 @@ addInput.addEventListener('keydown', (e) => {
     const name = addInput.value.trim();
     if (!name) return;
     writeLeekConfig((obj) => {
-      const groups = obj['leek-fund.stockGroups'] || [];
+      const groups = obj.groups || [];
       if (!groups.includes(name)) {
         groups.push(name);
-        obj['leek-fund.stockGroups'] = groups;
-        const arrs = obj['leek-fund.stockGroupStocks'] || [];
+        obj.groups = groups;
+        const arrs = obj.groupStocks || [];
         arrs.push([]);
-        obj['leek-fund.stockGroupStocks'] = arrs;
+        obj.groupStocks = arrs;
       }
     }).then(() => {
       closeAddPanel();
@@ -488,19 +512,19 @@ addResults.addEventListener('click', (e) => {
   if (addMode === 'addToGroup') {
     const groupName = addTargetGroup;
     writeLeekConfig((obj) => {
-      const groups = obj['leek-fund.stockGroups'] || [];
+      const groups = obj.groups || [];
       const gi = groups.indexOf(groupName);
       if (gi < 0) return;
-      const arrs = obj['leek-fund.stockGroupStocks'] || [];
+      const arrs = obj.groupStocks || [];
       const arr = arrs[gi] || [];
       if (!arr.includes(code)) {
         arrs[gi] = [...arr, code];
-        obj['leek-fund.stockGroupStocks'] = arrs;
+        obj.groupStocks = arrs;
       }
-      const stocks = obj['leek-fund.stocks'] || [];
+      const stocks = obj.stocks || [];
       if (!stocks.includes(code)) {
         stocks.push(code);
-        obj['leek-fund.stocks'] = stocks;
+        obj.stocks = stocks;
       }
     }).then(() => {
       closeAddPanel();
@@ -509,10 +533,10 @@ addResults.addEventListener('click', (e) => {
     return;
   }
   writeLeekConfig((obj) => {
-    const stocks = obj['leek-fund.stocks'] || [];
+    const stocks = obj.stocks || [];
     if (!stocks.includes(code)) {
       stocks.push(code);
-      obj['leek-fund.stocks'] = stocks;
+      obj.stocks = stocks;
     }
   }).then(() => {
     closeAddPanel();
