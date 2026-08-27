@@ -1,4 +1,6 @@
 const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, globalShortcut } = require('electron');
+const fs = require('fs');
+const path = require('path');
 
 let win = null;
 let tray = null;
@@ -88,6 +90,57 @@ ipcMain.handle('search-stocks', async (_event, keyword) => {
     timeout: 8000,
   });
   return (resp.data && resp.data.data && resp.data.data.stock) || [];
+});
+
+// ---- 配置读写：存到 userData/config.json（打包后 app.asar 内不可写） ----
+function configFile() {
+  return path.join(app.getPath('userData'), 'config.json');
+}
+function migrateConfig() {
+  const file = configFile();
+  if (fs.existsSync(file)) return;
+  // 1) 开发模式：迁移 float-window/config.json
+  const devFile = path.join(__dirname, 'config.json');
+  if (fs.existsSync(devFile)) {
+    try {
+      fs.copyFileSync(devFile, file);
+      console.log('已迁移本地 config.json 到 userData');
+      return;
+    } catch (err) {
+      console.error('迁移本地配置失败：', err.message);
+    }
+  }
+  // 2) 首次启动：从 VSCode settings.json 导入
+  try {
+    const vsFile = path.join(process.env.APPDATA || '', 'Code', 'User', 'settings.json');
+    const raw = fs.readFileSync(vsFile, 'utf8');
+    const stripped = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    const cfg = JSON.parse(stripped);
+    const data = {
+      stocks: cfg['leek-fund.stocks'] || [],
+      groups: cfg['leek-fund.stockGroups'] || [],
+      groupStocks: cfg['leek-fund.stockGroupStocks'] || [],
+    };
+    if (data.stocks.length || data.groups.length) {
+      fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf8');
+      console.log('已从 VSCode settings.json 导入配置');
+    }
+  } catch (err) {
+    // 无 VSCode 配置则保持空配置
+  }
+}
+ipcMain.handle('config-load', () => {
+  migrateConfig();
+  try {
+    return JSON.parse(fs.readFileSync(configFile(), 'utf8'));
+  } catch (err) {
+    return { stocks: [], groups: [], groupStocks: [] };
+  }
+});
+ipcMain.handle('config-write', (_event, obj) => {
+  migrateConfig();
+  fs.writeFileSync(configFile(), JSON.stringify(obj, null, 2), 'utf8');
+  return true;
 });
 
 // 腾讯行情（走主进程 Node http，绕过 renderer 的 CORS/Network Error）

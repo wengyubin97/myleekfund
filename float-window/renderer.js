@@ -10,53 +10,26 @@ const UP_COLOR_CLS = 'up';
 const DOWN_COLOR_CLS = 'down';
 
 /** 读 VSCode settings.json（容忍 JSONC 注释） */
-function loadLeekConfig() {
-  // 优先读本地 config.json（独立运行模式）
-  const localPath = path.join(__dirname, 'config.json');
+async function loadLeekConfig() {
+  // 配置读写走主进程 IPC（userData/config.json，打包后 asar 内不可写）
   try {
-    const raw = fs.readFileSync(localPath, 'utf8');
-    const cfg = JSON.parse(raw);
-    if (cfg.stocks || cfg.groups) {
-      return {
-        stocks: cfg.stocks || [],
-        groups: cfg.groups || [],
-        groupStocks: cfg.groupStocks || [],
-      };
-    }
-  } catch (err) {
-    // 本地配置不存在，尝试从 VSCode settings.json 导入
-  }
-
-  // 从 VSCode settings.json 导入（首次启动或无本地配置时）
-  const vscodePath = path.join(process.env.APPDATA || '', 'Code', 'User', 'settings.json');
-  try {
-    const raw = fs.readFileSync(vscodePath, 'utf8');
-    const stripped = raw
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/(^|[^:])\/\/.*$/gm, '$1');
-    const cfg = JSON.parse(stripped);
-    const result = {
-      stocks: cfg['leek-fund.stocks'] || [],
-      groups: cfg['leek-fund.stockGroups'] || [],
-      groupStocks: cfg['leek-fund.stockGroupStocks'] || [],
+    const cfg = await ipcRenderer.invoke('config-load');
+    return {
+      stocks: cfg.stocks || [],
+      groups: cfg.groups || [],
+      groupStocks: cfg.groupStocks || [],
     };
-    // 导入成功后保存到本地 config.json
-    if (result.stocks.length || result.groups.length) {
-      try {
-        fs.writeFileSync(localPath, JSON.stringify(result, null, 2), 'utf8');
-        console.log('已从 VSCode settings.json 导入配置到本地 config.json');
-      } catch (err) {
-        console.error('导入配置失败：', err.message);
-      }
-    }
-    return result;
   } catch (err) {
     console.error('读取配置失败：', err.message);
     return { stocks: [], groups: [], groupStocks: [] };
   }
 }
 
-const cfg = loadLeekConfig();
+let cfg = { stocks: [], groups: [], groupStocks: [] };
+loadLeekConfig().then((c) => {
+  cfg = c;
+  tick();
+});
 
 // 应用版本（打包时由 scripts/bump-version.js 生成，源码运行则无）
 let appVersion = '';
@@ -386,20 +359,16 @@ document.addEventListener('wheel', (e) => {
   drawChart();
 }, { passive: true });
 
-// ---- 配置增删改（本地 config.json，串行队列防并发写） ----
-function configPath() {
-  return path.join(__dirname, 'config.json');
-}
-function readConfigObj() {
-  const raw = fs.readFileSync(configPath(), 'utf8');
-  return JSON.parse(raw);
+// ---- 配置增删改（走主进程 IPC 写 userData/config.json，串行队列防并发写） ----
+async function readConfigObj() {
+  return await ipcRenderer.invoke('config-load');
 }
 let writeQueue = Promise.resolve();
 function writeLeekConfig(mutator) {
-  writeQueue = writeQueue.then(() => {
-    const obj = readConfigObj();
+  writeQueue = writeQueue.then(async () => {
+    const obj = await readConfigObj();
     mutator(obj);
-    fs.writeFileSync(configPath(), JSON.stringify(obj, null, 2), 'utf8');
+    await ipcRenderer.invoke('config-write', obj);
     cfg.stocks = obj.stocks || [];
     cfg.groups = obj.groups || [];
     cfg.groupStocks = obj.groupStocks || [];
@@ -1119,5 +1088,4 @@ setInterval(() => {
   if (chartCode) drawChart();
 }, POLL_INTERVAL);
 
-tick();
 setInterval(tick, POLL_INTERVAL);
