@@ -97,6 +97,7 @@ ipcMain.handle('fetch-quotes', async (_event, codes) => {
     params: { q: codes.join(','), fmt: 'json' },
     timeout: 8000,
     headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://gu.qq.com/' },
+    family: 4, // 强制 IPv4（本机 DNS 仅返回 IPv6 导致 getaddrinfo 失败）
   });
   return resp.data; // Buffer
 });
