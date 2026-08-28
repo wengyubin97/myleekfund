@@ -131,7 +131,7 @@ function render(quotes) {
   groups.forEach((g, i) => {
     const avg = g.members.reduce((s, m) => s + m.percent, 0) / g.members.length;
     const collapsed = !!uiState.collapsed[g.name];
-    html += `<div class="group-row group-header" data-idx="${i}" data-name="${g.name}"><span class="gmarker">${collapsed ? '▸' : '▾'}</span><span class="gname">${g.name}(${g.members.length})</span><span class="gavg ${clsOf(avg)}">${sign(avg)}${avg.toFixed(2)}%</span><span class="pin ${uiState.pinned.includes(g.name) ? 'pinned' : ''}" title="置顶/取消置顶">📌</span><span class="del" title="删除分组">×</span></div>`;
+    html += `<div class="group-row group-header" data-idx="${i}" data-name="${g.name}"><span class="gmarker">${collapsed ? '▸' : '▾'}</span><span class="gname">${g.name}(${g.members.length})</span><span class="gavg ${clsOf(avg)}">${sign(avg)}${avg.toFixed(2)}%</span><span class="pin ${uiState.pinned.includes(g.name) ? 'pinned' : ''}" title="置顶/取消置顶">📌</span><span class="rename" title="重命名分组">✏️</span><span class="del" title="删除分组">×</span></div>`;
     if (!collapsed) {
       html += g.members
         .map(
@@ -203,6 +203,14 @@ document.getElementById('list').addEventListener('click', (e) => {
       else uiState.pinned.push(name);
       saveUIState();
       if (lastQuotes) render(lastQuotes);
+    }
+    return;
+  }
+  const renameBtn = e.target.closest('.rename');
+  if (renameBtn) {
+    const groupRow = renameBtn.closest('.group-header');
+    if (groupRow && groupRow.dataset.name) {
+      openAddPanel('renameGroup', '输入新的分组名称，回车确认', groupRow.dataset.name, groupRow.dataset.name);
     }
     return;
   }
@@ -384,14 +392,15 @@ let addMode = 'stock'; // 'stock' | 'group' | 'addToGroup'
 let addTargetGroup = null; // addToGroup 模式的目标分组
 let searchTimer = null;
 
-function openAddPanel(mode, placeholder, targetGroup) {
+function openAddPanel(mode, placeholder, targetGroup, initialValue) {
   addMode = mode;
   addTargetGroup = targetGroup || null;
   addInput.placeholder = placeholder;
-  addInput.value = '';
+  addInput.value = initialValue || '';
   addResults.innerHTML = '';
   addPanel.style.display = 'block';
   addInput.focus();
+  if (initialValue) addInput.select();
 }
 function closeAddPanel() {
   addPanel.style.display = 'none';
@@ -427,7 +436,7 @@ function renderSearchResults(items) {
 }
 
 addInput.addEventListener('input', () => {
-  if (addMode === 'group') return;
+  if (addMode === 'group' || addMode === 'renameGroup') return;
   const keyword = addInput.value.trim();
   clearTimeout(searchTimer);
   if (!keyword) {
@@ -459,6 +468,28 @@ addInput.addEventListener('keydown', (e) => {
         arrs.push([]);
         obj.groupStocks = arrs;
       }
+    }).then(() => {
+      closeAddPanel();
+      tick();
+    });
+  } else if (e.key === 'Enter' && addMode === 'renameGroup') {
+    const newName = addInput.value.trim();
+    const oldName = addTargetGroup;
+    if (!newName || !oldName || newName === oldName) return;
+    writeLeekConfig((obj) => {
+      const groups = obj.groups || [];
+      const gi = groups.indexOf(oldName);
+      if (gi < 0) return;
+      groups[gi] = newName;
+      obj.groups = groups;
+      // 同步折叠/置顶状态里的旧组名引用
+      if (uiState.collapsed[oldName] !== undefined) {
+        uiState.collapsed[newName] = uiState.collapsed[oldName];
+        delete uiState.collapsed[oldName];
+      }
+      const pi = uiState.pinned.indexOf(oldName);
+      if (pi >= 0) uiState.pinned[pi] = newName;
+      saveUIState();
     }).then(() => {
       closeAddPanel();
       tick();
