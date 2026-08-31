@@ -50,10 +50,13 @@ function loadUIState() {
       groupSort: !!s.groupSort,
       stockSort: !!s.stockSort,
       bw: !!s.bw,
+      sparkW: s.sparkW || 80,
+      sparkH: s.sparkH || 26,
+      sparkZoom: s.sparkZoom || 1,
     };
   } catch (err) {
     console.error('读取界面状态失败：', err.message);
-    return { collapsed: {}, groupSort: false, stockSort: false };
+    return { collapsed: {}, groupSort: false, stockSort: false, sparkW: 80, sparkH: 26, sparkZoom: 1 };
   }
 }
 function saveUIState() {
@@ -195,13 +198,16 @@ function updateMinuteMap(rawMap) {
   }
 }
 
-/** 绘制单只股票的分时缩略图（黄=涨 蓝=跌 折线 + 虚线零轴） */
+/** 绘制单只股票的分时缩略图（0轴上方黄、下方蓝 折线 + 虚线零轴；尺寸/缩放可调） */
 function drawSpark(canvas, record) {
-  const cw = 80;
-  const ch = 26;
+  const cw = uiState.sparkW;
+  const ch = uiState.sparkH;
+  const zoom = uiState.sparkZoom;
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.round(cw * dpr);
   canvas.height = Math.round(ch * dpr);
+  canvas.style.width = `${cw}px`;
+  canvas.style.height = `${ch}px`;
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cw, ch);
@@ -213,7 +219,7 @@ function drawSpark(canvas, record) {
   const padT = 2;
   const padB = 2;
   const pcts = points.map((p) => (p.price / prevClose - 1) * 100);
-  const maxAbs = Math.max(...pcts.map((v) => Math.abs(v)), 0.3);
+  const maxAbs = Math.max(...pcts.map((v) => Math.abs(v)), 0.3) / zoom;
   const chartW = cw - padL - padR;
   const chartH = ch - padT - padB;
   const midY = padT + chartH / 2;
@@ -231,16 +237,30 @@ function drawSpark(canvas, record) {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // 折线（整条按最新价相对昨收的颜色）
-  const lastPct = pcts[pcts.length - 1];
-  ctx.strokeStyle = lastPct >= 0 ? '#f0c828' : '#6fb1ff';
+  // 折线：0轴上方黄、下方蓝（clip 两次绘制，跨越处自动在轴处分色）
+  const strokeLine = () => {
+    ctx.beginPath();
+    ctx.moveTo(toX(0), toY(pcts[0]));
+    for (let i = 1; i < pcts.length; i++) {
+      ctx.lineTo(toX(i), toY(pcts[i]));
+    }
+    ctx.stroke();
+  };
   ctx.lineWidth = 1.2;
+  ctx.save();
+  ctx.strokeStyle = '#f0c828';
   ctx.beginPath();
-  ctx.moveTo(toX(0), toY(pcts[0]));
-  for (let i = 1; i < pcts.length; i++) {
-    ctx.lineTo(toX(i), toY(pcts[i]));
-  }
-  ctx.stroke();
+  ctx.rect(padL, 0, cw - padL - padR, midY);
+  ctx.clip();
+  strokeLine();
+  ctx.restore();
+  ctx.save();
+  ctx.strokeStyle = '#6fb1ff';
+  ctx.beginPath();
+  ctx.rect(padL, midY, cw - padL - padR, ch - midY);
+  ctx.clip();
+  strokeLine();
+  ctx.restore();
 }
 
 async function tick() {
@@ -633,6 +653,29 @@ btnBw.addEventListener('click', () => {
   syncBw();
 });
 syncBw();
+
+// ---- 分时缩略图设置面板（宽/高/缩放） ----
+const sparkSettingsEl = document.getElementById('sparkSettings');
+function syncSparkSettings() {
+  document.getElementById('sparkW').value = uiState.sparkW;
+  document.getElementById('sparkH').value = uiState.sparkH;
+  document.getElementById('sparkZoom').value = uiState.sparkZoom;
+  document.getElementById('sparkWV').textContent = uiState.sparkW;
+  document.getElementById('sparkHV').textContent = uiState.sparkH;
+  document.getElementById('sparkZV').textContent = uiState.sparkZoom.toFixed(1);
+}
+document.getElementById('btnSparkSet').addEventListener('click', () => {
+  sparkSettingsEl.style.display = sparkSettingsEl.style.display === 'block' ? 'none' : 'block';
+  syncSparkSettings();
+});
+[['sparkW', 'sparkWV'], ['sparkH', 'sparkHV'], ['sparkZoom', 'sparkZV']].forEach(([key, labelId]) => {
+  document.getElementById(key).addEventListener('input', (e) => {
+    uiState[key] = key === 'sparkZoom' ? Number(e.target.value) : parseInt(e.target.value, 10);
+    document.getElementById(labelId).textContent = key === 'sparkZoom' ? uiState[key].toFixed(1) : uiState[key];
+    saveUIState();
+    if (lastQuotes) render(lastQuotes);
+  });
+});
 
 // ---- 图表视图（分时/日K/周K/月K） ----
 const chartView = document.getElementById('chartView');
