@@ -51,12 +51,11 @@ function loadUIState() {
       stockSort: !!s.stockSort,
       bw: !!s.bw,
       sparkW: s.sparkW || 80,
-      sparkH: s.sparkH || 26,
       sparkZoom: s.sparkZoom || 1,
     };
   } catch (err) {
     console.error('读取界面状态失败：', err.message);
-    return { collapsed: {}, groupSort: false, stockSort: false, sparkW: 80, sparkH: 26, sparkZoom: 1 };
+    return { collapsed: {}, groupSort: false, stockSort: false, sparkW: 80, sparkZoom: 1 };
   }
 }
 function saveUIState() {
@@ -198,11 +197,12 @@ function updateMinuteMap(rawMap) {
   }
 }
 
-/** 绘制单只股票的分时缩略图（0轴上方黄、下方蓝 折线 + 虚线零轴；尺寸/缩放可调） */
+/** 绘制单只股票的分时缩略图（0轴上方黄、下方蓝；缩放=水平窗口，高度随缩放自适应） */
 function drawSpark(canvas, record) {
   const cw = uiState.sparkW;
-  const ch = uiState.sparkH;
   const zoom = uiState.sparkZoom;
+  // 高度随缩放自适应（放大时变高，便于看细节）
+  const ch = Math.max(16, Math.min(80, Math.round(22 * zoom)));
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.round(cw * dpr);
   canvas.height = Math.round(ch * dpr);
@@ -214,17 +214,20 @@ function drawSpark(canvas, record) {
   if (!record || !record.points || record.points.length < 2) return;
 
   const { prevClose, points } = record;
+  // 缩放：只显示最右边区间（如 100 点放大 10x → 显示 [90,100]）
+  const windowN = Math.max(10, Math.round(points.length / zoom));
+  const pts = points.slice(points.length - windowN);
   const padL = 2;
   const padR = 2;
   const padT = 2;
   const padB = 2;
-  const pcts = points.map((p) => (p.price / prevClose - 1) * 100);
-  const maxAbs = Math.max(...pcts.map((v) => Math.abs(v)), 0.3) / zoom;
+  const pcts = pts.map((p) => (p.price / prevClose - 1) * 100);
+  const maxAbs = Math.max(...pcts.map((v) => Math.abs(v)), 0.3);
   const chartW = cw - padL - padR;
   const chartH = ch - padT - padB;
   const midY = padT + chartH / 2;
   const scale = chartH / 2 / maxAbs;
-  const toX = (i) => padL + (i / Math.max(points.length - 1, 1)) * chartW;
+  const toX = (i) => padL + (i / Math.max(pts.length - 1, 1)) * chartW;
   const toY = (pct) => midY - pct * scale;
 
   // 零轴虚线
@@ -670,21 +673,19 @@ btnBw.addEventListener('click', () => {
 });
 syncBw();
 
-// ---- 分时缩略图设置面板（宽/高/缩放） ----
+// ---- 分时缩略图设置面板（宽/缩放；高度随缩放自适应） ----
 const sparkSettingsEl = document.getElementById('sparkSettings');
 function syncSparkSettings() {
   document.getElementById('sparkW').value = uiState.sparkW;
-  document.getElementById('sparkH').value = uiState.sparkH;
   document.getElementById('sparkZoom').value = uiState.sparkZoom;
   document.getElementById('sparkWV').textContent = uiState.sparkW;
-  document.getElementById('sparkHV').textContent = uiState.sparkH;
   document.getElementById('sparkZV').textContent = uiState.sparkZoom.toFixed(1);
 }
 document.getElementById('btnSparkSet').addEventListener('click', () => {
   sparkSettingsEl.style.display = sparkSettingsEl.style.display === 'block' ? 'none' : 'block';
   syncSparkSettings();
 });
-[['sparkW', 'sparkWV'], ['sparkH', 'sparkHV'], ['sparkZoom', 'sparkZV']].forEach(([key, labelId]) => {
+[['sparkW', 'sparkWV'], ['sparkZoom', 'sparkZV']].forEach(([key, labelId]) => {
   document.getElementById(key).addEventListener('input', (e) => {
     uiState[key] = key === 'sparkZoom' ? Number(e.target.value) : parseInt(e.target.value, 10);
     document.getElementById(labelId).textContent = key === 'sparkZoom' ? uiState[key].toFixed(1) : uiState[key];
