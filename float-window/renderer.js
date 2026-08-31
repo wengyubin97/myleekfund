@@ -51,11 +51,12 @@ function loadUIState() {
       stockSort: !!s.stockSort,
       bw: !!s.bw,
       sparkW: s.sparkW || 80,
+      sparkH: s.sparkH || 26,
       sparkZoom: s.sparkZoom || 1,
     };
   } catch (err) {
     console.error('读取界面状态失败：', err.message);
-    return { collapsed: {}, groupSort: false, stockSort: false, sparkW: 80, sparkZoom: 1 };
+    return { collapsed: {}, groupSort: false, stockSort: false, sparkW: 80, sparkH: 26, sparkZoom: 1 };
   }
 }
 function saveUIState() {
@@ -197,12 +198,11 @@ function updateMinuteMap(rawMap) {
   }
 }
 
-/** 绘制单只股票的分时缩略图（0轴上方黄、下方蓝；缩放=水平窗口，高度随缩放自适应） */
+/** 绘制单只股票的分时缩略图（缩放=水平窗口；高度固定；Y轴适配可见窗口[min,max]；0轴上黄下蓝） */
 function drawSpark(canvas, record) {
   const cw = uiState.sparkW;
+  const ch = uiState.sparkH;
   const zoom = uiState.sparkZoom;
-  // 高度随缩放自适应（放大时变高，便于看细节）
-  const ch = Math.max(16, Math.min(80, Math.round(22 * zoom)));
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.round(cw * dpr);
   canvas.height = Math.round(ch * dpr);
@@ -214,31 +214,35 @@ function drawSpark(canvas, record) {
   if (!record || !record.points || record.points.length < 2) return;
 
   const { prevClose, points } = record;
-  // 缩放：只显示最右边区间（如 100 点放大 10x → 显示 [90,100]）
+  // 缩放：只显示最右边区间（如 100 点放大 10x → 显示 [90,100]），铺满整个宽度
   const windowN = Math.max(10, Math.round(points.length / zoom));
   const pts = points.slice(points.length - windowN);
   const padL = 2;
   const padR = 2;
   const padT = 2;
   const padB = 2;
-  const pcts = pts.map((p) => (p.price / prevClose - 1) * 100);
-  const maxAbs = Math.max(...pcts.map((v) => Math.abs(v)), 0.3);
   const chartW = cw - padL - padR;
   const chartH = ch - padT - padB;
-  const midY = padT + chartH / 2;
-  const scale = chartH / 2 / maxAbs;
+  const pcts = pts.map((p) => (p.price / prevClose - 1) * 100);
+  // Y 轴适配可见窗口 [min,max]（非对称）：窗口 [1,100] 显示 [5,15]，窗口 [90,100] 显示 [10,15]
+  const minP = Math.min(...pcts);
+  const maxP = Math.max(...pcts);
+  const range = Math.max(maxP - minP, 0.3);
   const toX = (i) => padL + (i / Math.max(pts.length - 1, 1)) * chartW;
-  const toY = (pct) => midY - pct * scale;
+  const toY = (pct) => padT + ((maxP - pct) / range) * chartH;
+  const midY = toY(0); // 零轴位置（0 在可见范围内才可见）
 
-  // 零轴虚线
-  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([2, 2]);
-  ctx.beginPath();
-  ctx.moveTo(padL, midY);
-  ctx.lineTo(cw - padR, midY);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  // 零轴虚线（仅当 0 落在可见区间内）
+  if (midY >= padT && midY <= padT + chartH) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 2]);
+    ctx.beginPath();
+    ctx.moveTo(padL, midY);
+    ctx.lineTo(cw - padR, midY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
 
   // 折线：0轴上方黄、下方蓝（clip 两次绘制，跨越处自动在轴处分色）
   const strokeLine = () => {
@@ -253,14 +257,14 @@ function drawSpark(canvas, record) {
   ctx.save();
   ctx.strokeStyle = '#f0c828';
   ctx.beginPath();
-  ctx.rect(padL, 0, cw - padL - padR, midY);
+  ctx.rect(padL, 0, cw - padL - padR, Math.max(0, midY));
   ctx.clip();
   strokeLine();
   ctx.restore();
   ctx.save();
   ctx.strokeStyle = '#6fb1ff';
   ctx.beginPath();
-  ctx.rect(padL, midY, cw - padL - padR, ch - midY);
+  ctx.rect(padL, Math.min(ch, Math.max(0, midY)), cw - padL - padR, ch);
   ctx.clip();
   strokeLine();
   ctx.restore();
@@ -673,19 +677,21 @@ btnBw.addEventListener('click', () => {
 });
 syncBw();
 
-// ---- 分时缩略图设置面板（宽/缩放；高度随缩放自适应） ----
+// ---- 分时缩略图设置面板（宽/高/缩放；缩放只改宽度，Y轴适配可见窗口） ----
 const sparkSettingsEl = document.getElementById('sparkSettings');
 function syncSparkSettings() {
   document.getElementById('sparkW').value = uiState.sparkW;
+  document.getElementById('sparkH').value = uiState.sparkH;
   document.getElementById('sparkZoom').value = uiState.sparkZoom;
   document.getElementById('sparkWV').textContent = uiState.sparkW;
+  document.getElementById('sparkHV').textContent = uiState.sparkH;
   document.getElementById('sparkZV').textContent = uiState.sparkZoom.toFixed(1);
 }
 document.getElementById('btnSparkSet').addEventListener('click', () => {
   sparkSettingsEl.style.display = sparkSettingsEl.style.display === 'block' ? 'none' : 'block';
   syncSparkSettings();
 });
-[['sparkW', 'sparkWV'], ['sparkZoom', 'sparkZV']].forEach(([key, labelId]) => {
+[['sparkW', 'sparkWV'], ['sparkH', 'sparkHV'], ['sparkZoom', 'sparkZV']].forEach(([key, labelId]) => {
   document.getElementById(key).addEventListener('input', (e) => {
     uiState[key] = key === 'sparkZoom' ? Number(e.target.value) : parseInt(e.target.value, 10);
     document.getElementById(labelId).textContent = key === 'sparkZoom' ? uiState[key].toFixed(1) : uiState[key];
