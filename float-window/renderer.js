@@ -263,6 +263,22 @@ function drawSpark(canvas, record) {
   ctx.restore();
 }
 
+/** 只返回展开分组（可见）股票的代码，用于分时缩略图拉取，折叠分组不请求 */
+function visibleStockCodes() {
+  const visible = new Set();
+  cfg.groups.forEach((gname, gi) => {
+    if (uiState.collapsed[gname]) return;
+    (cfg.groupStocks[gi] || []).forEach((c) => visible.add(c));
+  });
+  if (!uiState.collapsed['__rest__']) {
+    const grouped = new Set(cfg.groupStocks.flat());
+    cfg.stocks.forEach((c) => {
+      if (!grouped.has(c)) visible.add(c);
+    });
+  }
+  return [...visible];
+}
+
 async function tick() {
   const codes = [...new Set([...cfg.stocks, ...cfg.groupStocks.flat()])];
   if (!codes.length) {
@@ -270,10 +286,10 @@ async function tick() {
     return;
   }
   try {
-    // 行情 + 分时缩略图数据并行拉取
+    // 行情全量拉取；分时缩略图只拉取展开分组的股票
     const [quotes, minuteRaw] = await Promise.all([
       fetchQuotes(codes),
-      ipcRenderer.invoke('fetch-minute', codes).catch(() => ({})),
+      ipcRenderer.invoke('fetch-minute', visibleStockCodes()).catch(() => ({})),
     ]);
     updateMinuteMap(minuteRaw || {});
     render(quotes);
@@ -698,7 +714,6 @@ let lastGeom = null; // 最近一次绘制用到的几何信息（toX/toY/坐标
 let chartHover = null; // { x, y } 鼠标位置（画布 CSS 像素）
 const chartCache = new Map(); // `${code}:${mode}` -> { time, data }
 
-const MINUTE_QUERY = 'https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=';
 const KLINE_QUERY = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=';
 const MKLINE_QUERY = 'https://proxy.finance.qq.com/ifzqgtimg/appstock/app/kline/mkline?param=';
 const MINUTE_K_PERIODS = new Set(['m1', 'm5', 'm15', 'm60', 'm120']);
@@ -724,11 +739,10 @@ async function fetchChartData(code, mode) {
   }
   let data = null;
   if (mode === 'minute') {
-    const resp = await axios.get(MINUTE_QUERY + code, {
-      timeout: 8000,
-      headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://gu.qq.com/' },
-    });
-    const stock = resp.data && resp.data.data && resp.data.data[code];
+    // 分时走主进程 IPC（web.ifzq.gtimg.cn 的 minute 端点已下线返回 501，主进程用 ifzq.gtimg.cn）
+    const raw = await ipcRenderer.invoke('fetch-minute', [code]);
+    const body = raw[code];
+    const stock = body && body.data && body.data[code];
     const list = (stock && stock.data && stock.data.data) || [];
     const qt = (stock && stock.qt && stock.qt[code]) || [];
     const prevClose = parseFloat(qt[4]);

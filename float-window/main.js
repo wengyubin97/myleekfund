@@ -163,7 +163,8 @@ ipcMain.handle('fetch-minute', async (_event, codes) => {
     while (idx < codes.length) {
       const code = codes[idx++];
       try {
-        const resp = await searchAxios.get('https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=' + code, {
+        // 用 ifzq.gtimg.cn（web.ifzq.gtimg.cn 的 minute 端点已下线返回 501）
+        const resp = await searchAxios.get('https://ifzq.gtimg.cn/appstock/app/minute/query?code=' + code, {
           timeout: 8000,
           headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://gu.qq.com/' },
         });
