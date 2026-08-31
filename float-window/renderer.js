@@ -136,7 +136,7 @@ function render(quotes) {
       html += g.members
         .map(
           (m) =>
-            `<div class="stock-row" title="${m.name}" data-code="${m.code}" data-name="${m.name}" data-group="${g.name}"><span class="sname">${formatName(m.name)}</span><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span><span class="del" title="从分组移除">×</span></div>`
+            `<div class="stock-row" title="${m.name}" data-code="${m.code}" data-name="${m.name}" data-group="${g.name}"><span class="sname">${formatName(m.name)}</span><canvas class="spark" data-code="${m.code}"></canvas><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span><span class="del" title="从分组移除">×</span></div>`
         )
         .join('');
       html += `<div class="add-stock-row" data-name="${g.name}">➕ 添加股票到此分组</div>`;
@@ -152,7 +152,7 @@ function render(quotes) {
       html += restSorted
         .map(
           (m) =>
-            `<div class="stock-row" title="${m.name}" data-code="${m.code}" data-name="${m.name}"><span class="sname">${formatName(m.name)}</span><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span><span class="del" title="删除股票">×</span></div>`
+            `<div class="stock-row" title="${m.name}" data-code="${m.code}" data-name="${m.name}"><span class="sname">${formatName(m.name)}</span><canvas class="spark" data-code="${m.code}"></canvas><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span><span class="del" title="删除股票">×</span></div>`
         )
         .join('');
     }
@@ -162,9 +162,85 @@ function render(quotes) {
   }
   listEl.innerHTML = html;
 
+  // 绘制分时缩略图（从 minuteMap 取数，无数据则留空）
+  listEl.querySelectorAll('canvas.spark').forEach((cv) => {
+    drawSpark(cv, minuteMap.get(cv.dataset.code));
+  });
+
   const d = new Date();
   const pad = (n) => (n < 10 ? `0${n}` : n);
   document.getElementById('updated').textContent = `${appVersion ? `v${appVersion} · ` : ''}更新 ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+// 分时缩略图数据缓存：code -> { prevClose, points }
+const minuteMap = new Map();
+function updateMinuteMap(rawMap) {
+  for (const code of Object.keys(rawMap)) {
+    const body = rawMap[code];
+    const stock = body && body.data && body.data[code];
+    const list = (stock && stock.data && stock.data.data) || [];
+    const qt = (stock && stock.qt && stock.qt[code]) || [];
+    const prevClose = parseFloat(qt[4]);
+    const points = [];
+    list.forEach((line) => {
+      const parts = String(line).split(/\s+/);
+      if (parts.length >= 2) {
+        const price = parseFloat(parts[1]);
+        if (!isNaN(price)) points.push({ time: parts[0], price });
+      }
+    });
+    if (!isNaN(prevClose) && prevClose > 0 && points.length) {
+      minuteMap.set(code, { prevClose, points });
+    }
+  }
+}
+
+/** 绘制单只股票的分时缩略图（黄=涨 蓝=跌 折线 + 虚线零轴） */
+function drawSpark(canvas, record) {
+  const cw = 80;
+  const ch = 26;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(cw * dpr);
+  canvas.height = Math.round(ch * dpr);
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cw, ch);
+  if (!record || !record.points || record.points.length < 2) return;
+
+  const { prevClose, points } = record;
+  const padL = 2;
+  const padR = 2;
+  const padT = 2;
+  const padB = 2;
+  const pcts = points.map((p) => (p.price / prevClose - 1) * 100);
+  const maxAbs = Math.max(...pcts.map((v) => Math.abs(v)), 0.3);
+  const chartW = cw - padL - padR;
+  const chartH = ch - padT - padB;
+  const midY = padT + chartH / 2;
+  const scale = chartH / 2 / maxAbs;
+  const toX = (i) => padL + (i / Math.max(points.length - 1, 1)) * chartW;
+  const toY = (pct) => midY - pct * scale;
+
+  // 零轴虚线
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([2, 2]);
+  ctx.beginPath();
+  ctx.moveTo(padL, midY);
+  ctx.lineTo(cw - padR, midY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // 折线（整条按最新价相对昨收的颜色）
+  const lastPct = pcts[pcts.length - 1];
+  ctx.strokeStyle = lastPct >= 0 ? '#f0c828' : '#6fb1ff';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(toX(0), toY(pcts[0]));
+  for (let i = 1; i < pcts.length; i++) {
+    ctx.lineTo(toX(i), toY(pcts[i]));
+  }
+  ctx.stroke();
 }
 
 async function tick() {
@@ -174,7 +250,12 @@ async function tick() {
     return;
   }
   try {
-    const quotes = await fetchQuotes(codes);
+    // 行情 + 分时缩略图数据并行拉取
+    const [quotes, minuteRaw] = await Promise.all([
+      fetchQuotes(codes),
+      ipcRenderer.invoke('fetch-minute', codes).catch(() => ({})),
+    ]);
+    updateMinuteMap(minuteRaw || {});
     render(quotes);
   } catch (err) {
     console.error('行情拉取失败：', err.message);

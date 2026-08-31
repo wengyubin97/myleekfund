@@ -155,6 +155,28 @@ ipcMain.handle('fetch-quotes', async (_event, codes) => {
   return resp.data; // Buffer
 });
 
+// 分时数据（每只股一次请求，并发拉取；供列表缩略图）
+ipcMain.handle('fetch-minute', async (_event, codes) => {
+  const result = {};
+  let idx = 0;
+  const worker = async () => {
+    while (idx < codes.length) {
+      const code = codes[idx++];
+      try {
+        const resp = await searchAxios.get('https://web.ifzq.gtimg.cn/appstock/app/minute/query?code=' + code, {
+          timeout: 8000,
+          headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://gu.qq.com/' },
+        });
+        result[code] = resp.data;
+      } catch (err) {
+        // 单只失败跳过，不影响其它
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(6, codes.length) }, worker));
+  return result;
+});
+
 app.whenReady().then(() => {
   createWindow();
   createTray();
