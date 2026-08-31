@@ -405,7 +405,11 @@ document.getElementById('confirmYes').addEventListener('click', () => {
 document.getElementById('confirmNo').addEventListener('click', hideConfirm);
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (chartCode) {
+    if (helpPanelEl.style.display === 'block') {
+      helpPanelEl.style.display = 'none';
+      document.getElementById('list').style.display = '';
+      if (lastQuotes) render(lastQuotes);
+    } else if (chartCode) {
       closeChart();
     } else {
       hideConfirm();
@@ -676,6 +680,15 @@ btnBw.addEventListener('click', () => {
   syncBw();
 });
 syncBw();
+
+// ---- 使用帮助面板 ----
+const helpPanelEl = document.getElementById('helpPanel');
+document.getElementById('btnHelp').addEventListener('click', () => {
+  const show = helpPanelEl.style.display !== 'block';
+  helpPanelEl.style.display = show ? 'block' : 'none';
+  document.getElementById('list').style.display = show ? 'none' : '';
+  if (!show && lastQuotes) render(lastQuotes);
+});
 
 // ---- 分时缩略图设置面板（宽/高/缩放；缩放只改宽度，Y轴适配可见窗口） ----
 const sparkSettingsEl = document.getElementById('sparkSettings');

@@ -221,8 +221,34 @@
       border-radius: 3px;
     }
     #btnSparkSet:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+    #btnHelp {
+      border: none;
+      background: transparent;
+      color: #9a9a9a;
+      font-size: 13px;
+      font-weight: 700;
+      width: 20px;
+      height: 18px;
+      cursor: pointer;
+      line-height: 1;
+      margin-left: 6px;
+      border-radius: 3px;
+    }
+    #btnHelp:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
     #opacitySlider { width: 70px; accent-color: #f0c828; margin-left: 6px; }
     body.bw { filter: grayscale(1); }
+    #helpPanel {
+      flex: 1;
+      display: none;
+      overflow-y: auto;
+      padding: 8px 10px;
+      font-size: 11px;
+      color: #c8c8c8;
+      line-height: 1.7;
+    }
+    #helpPanel h4 { color: #f0c828; margin: 0 0 6px 0; font-size: 12px; }
+    #helpPanel p { margin: 0 0 8px 0; }
+    #helpPanel b { color: #e8e8e8; }
     #sparkSettings {
       flex: none;
       display: none;
@@ -282,6 +308,17 @@
       <label>高 <input type="range" id="sparkH" min="10" max="60" value="26" /><span id="sparkHV">26</span></label>
       <label>缩放 <input type="range" id="sparkZoom" min="1" max="5" step="0.5" value="1" /><span id="sparkZV">1.0</span></label>
     </div>
+    <div id="helpPanel">
+      <h4>使用指南</h4>
+      <p><b>添加 / 删除</b>：标题栏「+股」「+组」添加股票（搜索）与分组；行悬停显示 × 删除——分组内的 × 只从该组移除，「全部」里的 × 才是真正删除。</p>
+      <p><b>分组管理</b>：悬停分组标题行——📌 置顶、✏️ 重命名；点击标题折叠/展开（状态自动保存）。</p>
+      <p><b>排序</b>：标题栏「组」按平均涨跌幅降序、「股」按涨跌幅降序，再点恢复默认。</p>
+      <p><b>分时缩略图</b>：每行内嵌当日分时图（0轴上方黄、下方蓝），每 5 秒刷新；底部 ⚙ 可调宽/高/缩放（缩放=放大最近区间，Y轴自动适配）。</p>
+      <p><b>图表</b>：点击任意个股打开分时图/K线；顶部下拉可切换 1/5/15/60/120 分钟、日/周/月 K。滚轮缩放时间轴、按住拖动平移、鼠标悬停显示十字坐标与数据。← 或 Esc 返回列表。</p>
+      <p><b>显示</b>：底部滑杆调窗口透明度；标题栏「黑白」切换灰度模式。</p>
+      <p><b>托盘 / 快捷键</b>：Alt+Q 显示/隐藏悬浮窗；系统托盘左键切换、右键菜单退出；窗口内右键菜单可刷新。</p>
+      <p><b>配置</b>：股票与分组数据保存在本地 userData 配置，不依赖 VSCode，随 exe 直接可用。</p>
+    </div>
     <div id="list"></div>
     <div id="confirmBar">
       <span id="confirmText"></span>
@@ -291,6 +328,7 @@
     <div id="footer">
       <span id="updated">--</span>
       <span class="hint">右键菜单</span>
+      <button id="btnHelp" title="使用帮助">?</button>
       <button id="btnSparkSet" title="分时缩略图设置">⚙</button>
       <input type="range" id="opacitySlider" min="15" max="100" value="92" title="窗口透明度" />
     </div>
