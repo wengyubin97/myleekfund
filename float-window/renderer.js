@@ -931,8 +931,6 @@ let lastGeom = null; // 最近一次绘制用到的几何信息（toX/toY/坐标
 let chartHover = null; // { x, y } 鼠标位置（画布 CSS 像素）
 const chartCache = new Map(); // `${code}:${mode}` -> { time, data }
 
-const KLINE_QUERY = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=';
-const MKLINE_QUERY = 'https://proxy.finance.qq.com/ifzqgtimg/appstock/app/kline/mkline?param=';
 const MINUTE_K_PERIODS = new Set(['m1', 'm5', 'm15', 'm60', 'm120']);
 const C_UP = '#f0c828'; // 涨=黄
 const C_DOWN = '#6fb1ff'; // 跌=蓝
@@ -980,12 +978,9 @@ async function fetchChartData(code, mode) {
     });
     data = { prevClose, points };
   } else if (MINUTE_K_PERIODS.has(mode)) {
-    // 分钟K线走 mkline 端点（最多 320 根）
-    const resp = await axios.get(`${MKLINE_QUERY}${code},${mode},,320`, {
-      timeout: 8000,
-      headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://gu.qq.com/' },
-    });
-    const stock = resp.data && resp.data.data && resp.data.data[code];
+    // 分钟K线走 mkline 端点（最多 320 根，主进程 IPC）
+    const body = await ipcRenderer.invoke('fetch-mkline', { code, period: mode });
+    const stock = body && body.data && body.data[code];
     const rows = (stock && (stock[mode] || stock[`qfq${mode}`])) || [];
     data = rows
       .map((r) => ({
@@ -998,11 +993,9 @@ async function fetchChartData(code, mode) {
       }))
       .filter((k) => !isNaN(k.close) && k.close > 0);
   } else {
-    const resp = await axios.get(`${KLINE_QUERY}${code},${mode},,,320,qfq`, {
-      timeout: 8000,
-      headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://gu.qq.com/' },
-    });
-    const stock = resp.data && resp.data.data && resp.data.data[code];
+    // 日/周/月K线（前复权，主进程 IPC）
+    const body = await ipcRenderer.invoke('fetch-kline', { code, period: mode });
+    const stock = body && body.data && body.data[code];
     const rows = (stock && (stock[`qfq${mode}`] || stock[mode])) || [];
     data = rows
       .map((r) => ({

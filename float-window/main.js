@@ -202,6 +202,24 @@ ipcMain.handle('fetch-day-closes', async (_event, codes) => {
   return result;
 });
 
+// 日/周/月 K线（前复权，走主进程绕过 renderer CORS）
+ipcMain.handle('fetch-kline', async (_event, { code, period }) => {
+  const resp = await searchAxios.get('https://ifzq.gtimg.cn/appstock/app/fqkline/get?param=' + code + ',' + period + ',,,320,qfq', {
+    timeout: 8000,
+    headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://gu.qq.com/' },
+  });
+  return resp.data;
+});
+
+// 分钟K线（mkline，走主进程绕过 renderer CORS）
+ipcMain.handle('fetch-mkline', async (_event, { code, period }) => {
+  const resp = await searchAxios.get('https://proxy.finance.qq.com/ifzqgtimg/appstock/app/kline/mkline?param=' + code + ',' + period + ',,320', {
+    timeout: 8000,
+    headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://gu.qq.com/' },
+  });
+  return resp.data;
+});
+
 // 系统通知（预警触发）
 ipcMain.on('notify', (_event, { title, body }) => {
   if (Notification.isSupported()) {
