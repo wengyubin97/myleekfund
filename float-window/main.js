@@ -84,6 +84,8 @@ ipcMain.on('win-opacity', (_event, value) => {
 
 // 股票搜索（走主进程 Node http，绕过 renderer 的 CORS 限制）
 const searchAxios = require('axios');
+// 显式不走任何代理（Node 默认不读系统代理，此处防御环境变量干扰；保证关代理也能用）
+searchAxios.defaults.proxy = false;
 ipcMain.handle('search-stocks', async (_event, keyword) => {
   const resp = await searchAxios.get('https://proxy.finance.qq.com/ifzqgtimg/appstock/smartbox/search/get', {
     params: { q: keyword },
