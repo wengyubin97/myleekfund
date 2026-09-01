@@ -1146,7 +1146,7 @@ function drawMinute(ctx, w, h, data, total, prevVol) {
     volBase,
     prevClose,
     toX,
-    valueOfY: (y) => (midY - y) / scale,
+    valueOfY: (y) => prevClose * (1 + (midY - y) / scale / 100),
     infoLines: (i) => {
       const p = points[i];
       const pct = (p.price / prevClose - 1) * 100;
