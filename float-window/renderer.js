@@ -946,6 +946,7 @@ function drawMinute(ctx, w, h, data, total, prevVol) {
     padR,
     padT,
     chartH,
+    volBase,
     toX,
     valueOfY: (y) => (midY - y) / scale,
     infoLines: (i) => {
@@ -1058,6 +1059,7 @@ function drawKline(ctx, w, h, bars, mode, total) {
     padR,
     padT,
     chartH,
+    volBase,
     toX,
     valueOfY: (y) => maxP - ((y - padT) / chartH) * (maxP - minP),
     infoLines: (i) => {
@@ -1094,6 +1096,8 @@ function drawCrosshair(ctx, w, h) {
   const cx = g.toX(i);
   const yTop = g.padT;
   const yBot = g.padT + g.chartH;
+  // 竖线延伸到量柱基线（与成交量柱区域连通）
+  const vLineEnd = g.volBase && g.volBase > yBot ? g.volBase : yBot;
   const cy = Math.min(Math.max(chartHover.y, yTop), yBot);
 
   ctx.save();
@@ -1102,7 +1106,7 @@ function drawCrosshair(ctx, w, h) {
   ctx.setLineDash([4, 4]);
   ctx.beginPath();
   ctx.moveTo(cx, yTop);
-  ctx.lineTo(cx, yBot);
+  ctx.lineTo(cx, vLineEnd);
   ctx.stroke();
   ctx.beginPath();
   ctx.moveTo(g.padL, cy);
