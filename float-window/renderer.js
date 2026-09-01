@@ -1144,6 +1144,7 @@ function drawMinute(ctx, w, h, data, total, prevVol) {
     padT,
     chartH,
     volBase,
+    prevClose,
     toX,
     valueOfY: (y) => (midY - y) / scale,
     infoLines: (i) => {
@@ -1257,6 +1258,7 @@ function drawKline(ctx, w, h, bars, mode, total) {
     padT,
     chartH,
     volBase,
+    prevClose: n > 1 ? bars[n - 2].close : bars[n - 1].open,
     toX,
     valueOfY: (y) => maxP - ((y - padT) / chartH) * (maxP - minP),
     infoLines: (i) => {
@@ -1311,14 +1313,26 @@ function drawCrosshair(ctx, w, h) {
   ctx.stroke();
   ctx.restore();
 
-  // 左侧价格标注（在坐标留白区，不遮挡图像）
+  // 十字横线左侧显示涨跌百分比，右侧显示该位置价格（分时/K线通用）
   const price = g.valueOfY(cy);
-  const label = g.mode === 'minute' ? `${price >= 0 ? '+' : ''}${price.toFixed(2)}%` : price.toFixed(2);
-  const lw = label.length * 7;
+  const prevClose = g.prevClose;
+  const pct = prevClose > 0 ? (price / prevClose - 1) * 100 : 0;
+  const pctLabel = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+  const priceLabel = price.toFixed(2);
+
+  // 左侧：涨跌百分比
+  const lw = pctLabel.length * 7;
   ctx.fillStyle = 'rgba(16,16,20,0.85)';
   ctx.fillRect(0, cy - 7, lw + 8, 14);
+  ctx.fillStyle = pct >= 0 ? '#f0c828' : '#6fb1ff';
+  ctx.fillText(pctLabel, 4, cy + 3);
+
+  // 右侧：价格（右对齐）
+  const pw = priceLabel.length * 7;
+  ctx.fillStyle = 'rgba(16,16,20,0.85)';
+  ctx.fillRect(w - g.padR - pw - 4, cy - 7, pw + 8, 14);
   ctx.fillStyle = '#e8e8e8';
-  ctx.fillText(label, 4, cy + 3);
+  ctx.fillText(priceLabel, w - g.padR - pw - 4, cy + 3);
 
   // 底部坐标栏显示当前点数据
   chartInfoEl.textContent = g.infoLines(i).join(' ');
