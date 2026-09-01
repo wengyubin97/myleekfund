@@ -18,14 +18,15 @@ async function loadLeekConfig() {
       stocks: cfg.stocks || [],
       groups: cfg.groups || [],
       groupStocks: cfg.groupStocks || [],
+      alerts: cfg.alerts || [],
     };
   } catch (err) {
     console.error('读取配置失败：', err.message);
-    return { stocks: [], groups: [], groupStocks: [] };
+    return { stocks: [], groups: [], groupStocks: [], alerts: [] };
   }
 }
 
-let cfg = { stocks: [], groups: [], groupStocks: [] };
+let cfg = { stocks: [], groups: [], groupStocks: [], alerts: [] };
 loadLeekConfig().then((c) => {
   cfg = c;
   tick();
@@ -139,7 +140,7 @@ function render(quotes) {
       html += g.members
         .map(
           (m) =>
-            `<div class="stock-row" title="${m.name}" data-code="${m.code}" data-name="${m.name}" data-group="${g.name}"><span class="sname">${formatName(m.name)}</span><canvas class="spark" data-code="${m.code}"></canvas><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span><span class="del" title="从分组移除">×</span></div>`
+            `<div class="stock-row${hasAlertTriggered(m.code) ? ' alerted' : ''}" title="${m.name}" data-code="${m.code}" data-name="${m.name}" data-group="${g.name}"><span class="sname">${formatName(m.name)}</span><canvas class="spark" data-code="${m.code}"></canvas><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span><span class="alertbtn" title="设置预警">🔔</span><span class="del" title="从分组移除">×</span></div>`
         )
         .join('');
       html += `<div class="add-stock-row" data-name="${g.name}">➕ 添加股票到此分组</div>`;
@@ -155,7 +156,7 @@ function render(quotes) {
       html += restSorted
         .map(
           (m) =>
-            `<div class="stock-row" title="${m.name}" data-code="${m.code}" data-name="${m.name}"><span class="sname">${formatName(m.name)}</span><canvas class="spark" data-code="${m.code}"></canvas><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span><span class="del" title="删除股票">×</span></div>`
+            `<div class="stock-row${hasAlertTriggered(m.code) ? ' alerted' : ''}" title="${m.name}" data-code="${m.code}" data-name="${m.name}"><span class="sname">${formatName(m.name)}</span><canvas class="spark" data-code="${m.code}"></canvas><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span><span class="alertbtn" title="设置预警">🔔</span><span class="del" title="删除股票">×</span></div>`
         )
         .join('');
     }
@@ -173,6 +174,95 @@ function render(quotes) {
   const d = new Date();
   const pad = (n) => (n < 10 ? `0${n}` : n);
   document.getElementById('updated').textContent = `${appVersion ? `v${appVersion} · ` : ''}更新 ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+// ---- 股价预警 ----
+const alertTriggered = new Set(); // 当日已触发的预警 key（只触发一次）
+const alertPrev = new Map(); // 预警 key -> 上一 tick 的关系差值（价格-均线 / MA1-MA2 / 价格-阈值）
+let alertCheckDay = '';
+const dayClosesCache = new Map(); // code -> { closes: [..], day: 'YYYY-MM-DD' }
+
+function alertKey(al) {
+  return `${al.code}|${al.type}|${al.maN || 0}|${al.maM || 0}|${al.value || 0}`;
+}
+function hasAlertTriggered(code) {
+  const prefix = code + '|';
+  for (const k of alertTriggered) {
+    if (k.startsWith(prefix)) return true;
+  }
+  return false;
+}
+function alertLabel(al) {
+  switch (al.type) {
+    case 'cross_ma_up': return `价格上穿 MA${al.maN}`;
+    case 'cross_ma_down': return `价格下穿 MA${al.maN}`;
+    case 'ma_cross_up': return `MA${al.maN} 金叉 MA${al.maM}`;
+    case 'ma_cross_down': return `MA${al.maN} 死叉 MA${al.maM}`;
+    case 'cross_value_up': return `价格上穿 ${al.value}`;
+    case 'cross_value_down': return `价格下穿 ${al.value}`;
+    default: return al.type;
+  }
+}
+/** 均线值：最近 N 日收盘（历史 N-1 根 + 今日实时价） */
+function maValue(code, n, livePrice) {
+  const entry = dayClosesCache.get(code);
+  if (!entry || !entry.closes.length) return NaN;
+  const vals = entry.closes.slice(-(n - 1)).concat(livePrice);
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+async function ensureDayCloses(codes) {
+  const today = new Date().toISOString().slice(0, 10);
+  const need = codes.filter((c) => {
+    const e = dayClosesCache.get(c);
+    return !e || e.day !== today;
+  });
+  if (!need.length) return;
+  const raw = await ipcRenderer.invoke('fetch-day-closes', need).catch(() => ({}));
+  for (const c of need) {
+    const closes = raw[c];
+    if (closes && closes.length) dayClosesCache.set(c, { closes, day: today });
+  }
+}
+function evaluateAlerts(quotes) {
+  if (!cfg.alerts || !cfg.alerts.length) return;
+  const priceMap = new Map(quotes.map((q) => [q.code, q.price]));
+  for (const al of cfg.alerts) {
+    const price = priceMap.get(al.code);
+    if (price === undefined || !dayClosesCache.has(al.code)) continue;
+    const key = alertKey(al);
+    let cur;
+    if (al.type === 'cross_ma_up' || al.type === 'cross_ma_down') {
+      cur = price - maValue(al.code, al.maN, price);
+    } else if (al.type === 'ma_cross_up' || al.type === 'ma_cross_down') {
+      cur = maValue(al.code, al.maN, price) - maValue(al.code, al.maM, price);
+    } else {
+      cur = price - al.value;
+    }
+    const isUp = al.type === 'cross_ma_up' || al.type === 'ma_cross_up' || al.type === 'cross_value_up';
+    const prev = alertPrev.get(key);
+    if (prev !== undefined && prev <= 0 && cur > 0 && isUp) {
+      fireAlert(al, price);
+    } else if (prev !== undefined && prev >= 0 && cur < 0 && !isUp) {
+      fireAlert(al, price);
+    }
+    alertPrev.set(key, cur);
+  }
+}
+function fireAlert(al, price) {
+  const key = alertKey(al);
+  if (alertTriggered.has(key)) return;
+  alertTriggered.add(key);
+  const q = lastQuotes && lastQuotes.find((x) => x.code === al.code);
+  const name = q ? q.name : al.code;
+  ipcRenderer.send('notify', { title: `韭菜悬浮窗 · ${name}`, body: `${alertLabel(al)}（现价 ${price}）` });
+  if (lastQuotes) render(lastQuotes);
+}
+function resetAlertDay() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (alertCheckDay !== today) {
+    alertCheckDay = today;
+    alertTriggered.clear();
+  }
 }
 
 // 分时缩略图数据缓存：code -> { prevClose, points }
@@ -292,6 +382,7 @@ async function tick() {
     render([]);
     return;
   }
+  resetAlertDay();
   try {
     // 行情全量拉取；分时缩略图只拉取展开分组的股票
     const [quotes, minuteRaw] = await Promise.all([
@@ -300,6 +391,11 @@ async function tick() {
     ]);
     updateMinuteMap(minuteRaw || {});
     render(quotes);
+    // 预警检测（异步拉取日K收盘后评估，不阻塞行情渲染）
+    const alertCodes = cfg.alerts && cfg.alerts.length ? [...new Set(cfg.alerts.map((a) => a.code))] : [];
+    if (alertCodes.length) {
+      ensureDayCloses(alertCodes).then(() => evaluateAlerts(quotes));
+    }
   } catch (err) {
     console.error('行情拉取失败：', err.message);
   }
@@ -328,6 +424,12 @@ document.getElementById('list').addEventListener('click', (e) => {
       saveUIState();
       if (lastQuotes) render(lastQuotes);
     }
+    return;
+  }
+  const alertBtn = e.target.closest('.alertbtn');
+  if (alertBtn) {
+    const stockRow = alertBtn.closest('.stock-row');
+    if (stockRow) openAlertPanel(stockRow.dataset.code, stockRow.dataset.name);
     return;
   }
   const renameBtn = e.target.closest('.rename');
@@ -405,7 +507,9 @@ document.getElementById('confirmYes').addEventListener('click', () => {
 document.getElementById('confirmNo').addEventListener('click', hideConfirm);
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (helpPanelEl.style.display === 'block') {
+    if (alertPanelEl.style.display === 'block') {
+      closeAlertPanel();
+    } else if (helpPanelEl.style.display === 'block') {
       helpPanelEl.style.display = 'none';
       document.getElementById('list').style.display = '';
       if (lastQuotes) render(lastQuotes);
@@ -508,6 +612,7 @@ function writeLeekConfig(mutator) {
     cfg.stocks = obj.stocks || [];
     cfg.groups = obj.groups || [];
     cfg.groupStocks = obj.groupStocks || [];
+    cfg.alerts = obj.alerts || [];
   });
   return writeQueue;
 }
@@ -712,6 +817,98 @@ document.getElementById('btnSparkSet').addEventListener('click', () => {
     if (lastQuotes) render(lastQuotes);
   });
 });
+
+// ---- 股价预警配置面板（按个股） ----
+const alertPanelEl = document.getElementById('alertPanel');
+const alertTypeEl = document.getElementById('alertType');
+let alertCode = null;
+function alertFormToObj() {
+  const type = alertTypeEl.value;
+  return {
+    code: alertCode,
+    type,
+    maN: parseInt(document.getElementById('alertMaN').value, 10) || 5,
+    maM: parseInt(document.getElementById('alertMaM').value, 10) || 10,
+    value: parseFloat(document.getElementById('alertValue').value),
+  };
+}
+function syncAlertFields() {
+  const type = alertTypeEl.value;
+  document.getElementById('alertMaRow').style.display = (type === 'cross_ma_up' || type === 'cross_ma_down' || type === 'ma_cross_up' || type === 'ma_cross_down') ? 'flex' : 'none';
+  document.getElementById('alertMaMRow').style.display = (type === 'ma_cross_up' || type === 'ma_cross_down') ? 'flex' : 'none';
+  document.getElementById('alertValueRow').style.display = (type === 'cross_value_up' || type === 'cross_value_down') ? 'flex' : 'none';
+}
+function renderAlertList() {
+  const listEl = document.getElementById('alertList');
+  const mine = (cfg.alerts || []).filter((a) => a.code === alertCode);
+  if (!mine.length) {
+    listEl.innerHTML = '<div style="color:#6a6a6a;margin-top:4px;">暂无预警</div>';
+    return;
+  }
+  listEl.innerHTML = mine
+    .map(
+      (a, i) =>
+        `<div class="alert-item"><span>${alertLabel(a)}</span><span class="del" data-i="${i}">✕</span></div>`
+    )
+    .join('');
+  listEl.querySelectorAll('.del').forEach((d) => {
+    d.addEventListener('click', () => {
+      const al = mine[Number(d.dataset.i)];
+      deleteAlert(al);
+    });
+  });
+}
+function openAlertPanel(code, name) {
+  alertCode = code;
+  document.getElementById('alertStockName').textContent = `${name} ${code}`;
+  alertTypeEl.value = 'cross_ma_up';
+  syncAlertFields();
+  renderAlertList();
+  alertPanelEl.style.display = 'block';
+  document.getElementById('list').style.display = 'none';
+}
+function closeAlertPanel() {
+  alertPanelEl.style.display = 'none';
+  document.getElementById('list').style.display = '';
+  alertCode = null;
+  if (lastQuotes) render(lastQuotes);
+}
+document.getElementById('alertClose').addEventListener('click', closeAlertPanel);
+alertTypeEl.addEventListener('change', syncAlertFields);
+document.getElementById('alertSave').addEventListener('click', () => {
+  const al = alertFormToObj();
+  if (!al.code) return;
+  writeLeekConfig((obj) => {
+    const arr = obj.alerts || [];
+    const dup = arr.some(
+      (a) => a.code === al.code && a.type === al.type && a.maN === al.maN && a.maM === al.maM && a.value === al.value
+    );
+    if (!dup) {
+      arr.push(al);
+      obj.alerts = arr;
+    }
+  }).then(() => {
+    alertPrev.clear();
+    renderAlertList();
+  });
+});
+document.getElementById('alertDel').addEventListener('click', () => {
+  const al = alertFormToObj();
+  if (!al.code) return;
+  deleteAlert(al);
+});
+function deleteAlert(al) {
+  writeLeekConfig((obj) => {
+    obj.alerts = (obj.alerts || []).filter(
+      (a) => !(a.code === al.code && a.type === al.type && a.maN === al.maN && a.maM === al.maM && a.value === al.value)
+    );
+  }).then(() => {
+    alertPrev.clear();
+    alertTriggered.clear();
+    renderAlertList();
+    if (lastQuotes) render(lastQuotes);
+  });
+}
 
 // ---- 图表视图（分时/日K/周K/月K） ----
 const chartView = document.getElementById('chartView');

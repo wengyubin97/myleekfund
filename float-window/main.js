@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, globalShortcut, Notification } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -178,7 +178,39 @@ ipcMain.handle('fetch-minute', async (_event, codes) => {
   return result;
 });
 
+// 日K收盘价（供预警均线计算，前复权）
+ipcMain.handle('fetch-day-closes', async (_event, codes) => {
+  const result = {};
+  let idx = 0;
+  const worker = async () => {
+    while (idx < codes.length) {
+      const code = codes[idx++];
+      try {
+        const resp = await searchAxios.get('https://ifzq.gtimg.cn/appstock/app/fqkline/get?param=' + code + ',day,,,60,qfq', {
+          timeout: 8000,
+          headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://gu.qq.com/' },
+        });
+        const stock = resp.data && resp.data.data && resp.data.data[code];
+        const rows = (stock && (stock.qfqday || stock.day)) || [];
+        result[code] = rows.map((r) => parseFloat(r[2])).filter((v) => !isNaN(v));
+      } catch (err) {
+        // 单只失败跳过
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, codes.length) }, worker));
+  return result;
+});
+
+// 系统通知（预警触发）
+ipcMain.on('notify', (_event, { title, body }) => {
+  if (Notification.isSupported()) {
+    new Notification({ title, body }).show();
+  }
+});
+
 app.whenReady().then(() => {
+  app.setAppUserModelId('com.wengyubin.leekfundfloat'); // 打包版系统通知正确显示
   createWindow();
   createTray();
 
