@@ -7,7 +7,8 @@
   "scripts": {
     "start": "electron .",
     "prepack": "node scripts/bump-version.js",
-    "pack": "electron-builder --win portable"
+    "pack": "electron-builder --win portable",
+    "pack:mac": "electron-builder --mac zip"
   },
   "build": {
     "appId": "com.wengyubin.leekfundfloat",
@@ -30,6 +31,12 @@
     },
     "portable": {
       "artifactName": "leek-float-${version}.exe"
+    },
+    "mac": {
+      "target": [
+        "zip"
+      ],
+      "category": "public.app-category.finance"
     }
   },
   "dependencies": {
