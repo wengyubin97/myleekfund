@@ -108,16 +108,34 @@ async function fetchQuotes(codes) {
   return codes.map((code) => {
     const arr = data[code.toLowerCase()];
     if (!arr) return null;
-    const price = parseFloat(arr[3]);
+    const rawPrice = String(arr[3]);
+    const price = parseFloat(rawPrice);
     const yestclose = parseFloat(arr[4]);
     const percent = yestclose > 0 ? ((price / yestclose - 1) * 100) : 0;
+    // 按原始报价推断小数位（ETF/基金常为 3 位，如 1.234）
+    let decimals = 2;
+    const dm = /\.(\d+)/.exec(rawPrice);
+    if (dm) decimals = Math.min(3, Math.max(2, dm[1].length));
     return {
       code: code.toLowerCase(),
       name: arr[1],
       price,
       percent,
+      decimals,
     };
   }).filter(Boolean);
+}
+
+/** 按小数位格式化价格 */
+function fmtPrice(price, dec) {
+  return price.toFixed(dec === undefined ? 2 : dec);
+}
+
+/** 从原始价格字符串推断小数位（2~3 位） */
+function priceDec(rawPrice) {
+  const dm = /\.(\d+)/.exec(String(rawPrice));
+  if (dm) return Math.min(3, Math.max(2, dm[1].length));
+  return 2;
 }
 
 function render(quotes) {
@@ -154,7 +172,7 @@ function render(quotes) {
       html += g.members
         .map(
           (m) =>
-            `<div class="stock-row${hasAlertTriggered(m.code) ? ' alerted' : ''}" title="${m.name}" data-code="${m.code}" data-name="${m.name}" data-group="${g.name}"><span class="sname">${formatName(m.name)}</span><canvas class="spark" data-code="${m.code}"></canvas><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span><span class="alertbtn" title="设置预警">🔔</span><span class="del" title="从分组移除">×</span></div>`
+            `<div class="stock-row${hasAlertTriggered(m.code) ? ' alerted' : ''}" title="${m.name}" data-code="${m.code}" data-name="${m.name}" data-group="${g.name}"><span class="sname">${formatName(m.name)}</span><canvas class="spark" data-code="${m.code}"></canvas><span class="sprice flat">${fmtPrice(m.price, m.decimals)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span><span class="alertbtn" title="设置预警">🔔</span><span class="del" title="从分组移除">×</span></div>`
         )
         .join('');
       html += `<div class="add-stock-row" data-name="${g.name}">➕ 添加股票到此分组</div>`;
@@ -170,7 +188,7 @@ function render(quotes) {
       html += restSorted
         .map(
           (m) =>
-            `<div class="stock-row${hasAlertTriggered(m.code) ? ' alerted' : ''}" title="${m.name}" data-code="${m.code}" data-name="${m.name}"><span class="sname">${formatName(m.name)}</span><canvas class="spark" data-code="${m.code}"></canvas><span class="sprice flat">${m.price.toFixed(2)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span><span class="alertbtn" title="设置预警">🔔</span><span class="del" title="删除股票">×</span></div>`
+            `<div class="stock-row${hasAlertTriggered(m.code) ? ' alerted' : ''}" title="${m.name}" data-code="${m.code}" data-name="${m.name}"><span class="sname">${formatName(m.name)}</span><canvas class="spark" data-code="${m.code}"></canvas><span class="sprice flat">${fmtPrice(m.price, m.decimals)}</span><span class="spct ${clsOf(m.percent)}">${sign(m.percent)}${m.percent.toFixed(2)}%</span><span class="alertbtn" title="设置预警">🔔</span><span class="del" title="删除股票">×</span></div>`
         )
         .join('');
     }
@@ -266,9 +284,9 @@ function fireAlert(al, price) {
   const key = alertKey(al);
   if (alertTriggered.has(key)) return;
   alertTriggered.add(key);
-  const q = lastQuotes && lastQuotes.find((x) => x.code === al.code);
-  const name = q ? q.name : al.code;
-  ipcRenderer.send('notify', { title: `韭菜悬浮窗 · ${name}`, body: `${alertLabel(al)}（现价 ${price}）` });
+  const q2 = lastQuotes && lastQuotes.find((x) => x.code === al.code);
+  const name = q2 ? q2.name : al.code;
+  ipcRenderer.send('notify', { title: `韭菜悬浮窗 · ${name}`, body: `${alertLabel(al)}（现价 ${fmtPrice(price, q2 ? q2.decimals : 2)}）` });
   if (lastQuotes) render(lastQuotes);
 }
 function resetAlertDay() {
@@ -990,7 +1008,7 @@ async function fetchChartData(code, mode) {
         }
       }
     });
-    data = { prevClose, points };
+    data = { prevClose, points, dec: points.length ? priceDec(list[points.length - 1].split(/\s+/)[1]) : 2 };
   } else if (MINUTE_K_PERIODS.has(mode)) {
     // 分钟K线走 mkline 端点（最多 320 根，主进程 IPC）
     const body = await ipcRenderer.invoke('fetch-mkline', { code, period: mode });
@@ -1006,6 +1024,7 @@ async function fetchChartData(code, mode) {
         volume: parseFloat(r[5]) || 0,
       }))
       .filter((k) => !isNaN(k.close) && k.close > 0);
+    data.dec = rows.length ? priceDec(rows[rows.length - 1][2]) : 2;
   } else {
     // 日/周/月K线（前复权，主进程 IPC）
     const body = await ipcRenderer.invoke('fetch-kline', { code, period: mode });
@@ -1021,6 +1040,7 @@ async function fetchChartData(code, mode) {
         volume: parseFloat(r[5]) || 0,
       }))
       .filter((k) => !isNaN(k.close) && k.close > 0);
+    data.dec = rows.length ? priceDec(rows[rows.length - 1][2]) : 2;
   }
   chartCache.set(key, { time: Date.now(), data });
   return data;
@@ -1048,7 +1068,7 @@ function calcLotFactor(points) {
   return 0;
 }
 
-function drawMinute(ctx, w, h, data, total, prevVol) {
+function drawMinute(ctx, w, h, data, total, prevVol, dec) {
   const { prevClose, points } = data;
   const padL = 10;
   const padR = 10;
@@ -1143,7 +1163,7 @@ function drawMinute(ctx, w, h, data, total, prevVol) {
     ctx.fillText(`${t.slice(0, 2)}:${t.slice(2, 4)}`, toX(i) - 12, h - 6);
   });
 
-  chartLegendEl.textContent = `显示 ${points.length}/${total} · 昨收 ${prevClose}  现价 ${points[points.length - 1].price.toFixed(2)}  ${lastPct >= 0 ? '+' : ''}${lastPct.toFixed(2)}%`;
+  chartLegendEl.textContent = `显示 ${points.length}/${total} · 昨收 ${fmtPrice(prevClose, dec)}  现价 ${fmtPrice(points[points.length - 1].price, dec)}  ${lastPct >= 0 ? '+' : ''}${lastPct.toFixed(2)}%`;
 
   lastGeom = {
     mode: 'minute',
@@ -1154,6 +1174,7 @@ function drawMinute(ctx, w, h, data, total, prevVol) {
     chartH,
     volBase,
     prevClose,
+    dec,
     pcts,
     avgPcts,
     toX,
@@ -1165,14 +1186,14 @@ function drawMinute(ctx, w, h, data, total, prevVol) {
       const v = vols[i] || 0;
       const fmt = (x) => (x >= 10000 ? `${(x / 10000).toFixed(1)}万` : String(x));
       return [
-        `${t.slice(0, 2)}:${t.slice(2, 4)}  价 ${p.price.toFixed(2)}  ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`,
+        `${t.slice(0, 2)}:${t.slice(2, 4)}  价 ${fmtPrice(p.price, dec)}  ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`,
         `量 ${fmt(v)}`,
       ];
     },
   };
 }
 
-function drawKline(ctx, w, h, bars, mode, total) {
+function drawKline(ctx, w, h, bars, mode, total, dec) {
   const padL = 10;
   const padR = 10;
   const padT = 10;
@@ -1259,7 +1280,7 @@ function drawKline(ctx, w, h, bars, mode, total) {
   // 图例：最新一根 OHLC + 显示根数
   const last = bars[n - 1];
   const pct = n > 1 ? (last.close / bars[n - 2].close - 1) * 100 : 0;
-  chartLegendEl.textContent = `显示 ${bars.length}/${total} 根 · 开 ${last.open.toFixed(2)} 高 ${last.high.toFixed(2)} 低 ${last.low.toFixed(2)} 收 ${last.close.toFixed(2)}  ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+  chartLegendEl.textContent = `显示 ${bars.length}/${total} 根 · 开 ${fmtPrice(last.open, dec)} 高 ${fmtPrice(last.high, dec)} 低 ${fmtPrice(last.low, dec)} 收 ${fmtPrice(last.close, dec)}  ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
 
   lastGeom = {
     mode,
@@ -1270,6 +1291,7 @@ function drawKline(ctx, w, h, bars, mode, total) {
     chartH,
     volBase,
     prevClose: n > 1 ? bars[n - 2].close : bars[n - 1].open,
+    dec,
     toX,
     valueOfY: (y) => maxP - ((y - padT) / chartH) * (maxP - minP),
     infoLines: (i) => {
@@ -1280,8 +1302,8 @@ function drawKline(ctx, w, h, bars, mode, total) {
       const d = MINUTE_K_PERIODS.has(mode) ? `${b.date.slice(8, 10)}:${b.date.slice(10, 12)}` : b.date;
       return [
         `${d}`,
-        `开 ${b.open.toFixed(2)} 高 ${b.high.toFixed(2)}`,
-        `低 ${b.low.toFixed(2)} 收 ${b.close.toFixed(2)}  ${bpct >= 0 ? '+' : ''}${bpct.toFixed(2)}%`,
+        `开 ${fmtPrice(b.open, dec)} 高 ${fmtPrice(b.high, dec)}`,
+        `低 ${fmtPrice(b.low, dec)} 收 ${fmtPrice(b.close, dec)}  ${bpct >= 0 ? '+' : ''}${bpct.toFixed(2)}%`,
         `量 ${fmt(b.volume)}`,
       ];
     },
@@ -1340,7 +1362,7 @@ function drawCrosshair(ctx, w, h) {
   const prevClose = g.prevClose;
   const pct = prevClose > 0 ? (price / prevClose - 1) * 100 : 0;
   const pctLabel = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
-  const priceLabel = price.toFixed(2);
+  const priceLabel = fmtPrice(price, g.dec);
 
   // 左侧：涨跌百分比
   const lw = pctLabel.length * 7;
@@ -1406,14 +1428,14 @@ function renderChart() {
     const start = Math.max(0, end - minuteCount);
     const prevVol = start > 0 ? data.points[start - 1].volume || 0 : 0;
     const visible = data.points.slice(start, end);
-    drawMinute(ctx, w, h, { prevClose: data.prevClose, points: visible }, data.points.length, prevVol);
+    drawMinute(ctx, w, h, { prevClose: data.prevClose, points: visible }, data.points.length, prevVol, data.dec);
   } else {
     klineMax = data.length;
     if (klineCount > klineMax) klineCount = klineMax;
     klineOffset = Math.min(klineOffset, Math.max(0, klineMax - klineCount));
     const end = data.length - klineOffset;
     const start = Math.max(0, end - klineCount);
-    drawKline(ctx, w, h, data.slice(start, end), mode, data.length);
+    drawKline(ctx, w, h, data.slice(start, end), mode, data.length, data.dec);
   }
   drawCrosshair(ctx, w, h);
 }
