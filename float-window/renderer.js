@@ -32,6 +32,20 @@ loadLeekConfig().then((c) => {
   tick();
 });
 
+// 主进程导入配置后，重新加载
+ipcRenderer.on('config-reloaded', async () => {
+  const c = await ipcRenderer.invoke('config-load').catch(() => null);
+  if (!c) return;
+  cfg.stocks = c.stocks || [];
+  cfg.groups = c.groups || [];
+  cfg.groupStocks = c.groupStocks || [];
+  cfg.alerts = c.alerts || [];
+  cfg.drawings = c.drawings || [];
+  alertPrev.clear();
+  alertTriggered.clear();
+  tick();
+});
+
 // 应用版本（打包时由 scripts/bump-version.js 生成，源码运行则无）
 let appVersion = '';
 try {

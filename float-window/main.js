@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, globalShortcut, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, globalShortcut, Notification, dialog } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -30,10 +30,14 @@ function createWindow() {
   win.setMenuBarVisibility(false);
   win.loadFile('index.html');
 
-  // 右键菜单（窗口级：刷新/开发者工具/退出）
+  // 右键菜单（窗口级：刷新/导入导出/开发者工具/退出）
   win.webContents.on('context-menu', () => {
     Menu.buildFromTemplate([
       { label: '刷新数据', click: () => win.webContents.reload() },
+      { type: 'separator' },
+      { label: '导出配置…', click: () => exportConfig() },
+      { label: '导入配置…', click: () => importConfig() },
+      { type: 'separator' },
       { label: '开发者工具', click: () => win.webContents.toggleDevTools() },
       { type: 'separator' },
       { label: '退出', click: () => app.quit() },
@@ -144,6 +148,44 @@ ipcMain.handle('config-write', (_event, obj) => {
   fs.writeFileSync(configFile(), JSON.stringify(obj, null, 2), 'utf8');
   return true;
 });
+
+// ---- 配置导入 / 导出（原生文件对话框） ----
+async function exportConfig() {
+  migrateConfig();
+  const file = configFile();
+  if (!fs.existsSync(file)) return;
+  const defaultName = 'leek-fund-config.json';
+  const startDir = app.getPath('documents');
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    title: '导出配置',
+    defaultPath: path.join(startDir, defaultName),
+    filters: [{ name: 'JSON 配置', extensions: ['json'] }],
+  });
+  if (canceled || !filePath) return;
+  fs.copyFileSync(file, filePath);
+}
+
+async function importConfig() {
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    title: '导入配置',
+    properties: ['openFile'],
+    filters: [{ name: 'JSON 配置', extensions: ['json'] }],
+  });
+  if (canceled || !filePaths || !filePaths.length) return;
+  try {
+    const obj = JSON.parse(fs.readFileSync(filePaths[0], 'utf8'));
+    if (!Array.isArray(obj.stocks) || !Array.isArray(obj.groups) || !Array.isArray(obj.groupStocks)) {
+      dialog.showMessageBox(win, { type: 'warning', message: '配置文件格式不正确（需要 stocks/groups/groupStocks 数组）' });
+      return;
+    }
+    if (!Array.isArray(obj.alerts)) obj.alerts = [];
+    if (!Array.isArray(obj.drawings)) obj.drawings = [];
+    fs.writeFileSync(configFile(), JSON.stringify(obj, null, 2), 'utf8');
+    if (win) win.webContents.send('config-reloaded');
+  } catch (err) {
+    dialog.showMessageBox(win, { type: 'error', message: '导入失败：' + err.message });
+  }
+}
 
 // 腾讯行情（走主进程 Node http，绕过 renderer 的 CORS/Network Error）
 ipcMain.handle('fetch-quotes', async (_event, codes) => {
