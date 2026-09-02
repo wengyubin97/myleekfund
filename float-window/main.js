@@ -38,6 +38,8 @@ function createWindow() {
       { label: '导出配置…', click: () => exportConfig() },
       { label: '导入配置…', click: () => importConfig() },
       { type: 'separator' },
+      hotkeySubmenu(),
+      { type: 'separator' },
       { label: '开发者工具', click: () => win.webContents.toggleDevTools() },
       { type: 'separator' },
       { label: '退出', click: () => app.quit() },
@@ -68,6 +70,8 @@ function createTray() {
       tray.popUpContextMenu(
         Menu.buildFromTemplate([
           { label: '显示/隐藏悬浮窗', click: toggleWindow },
+          { type: 'separator' },
+          hotkeySubmenu(),
           { type: 'separator' },
           { label: '退出', click: () => app.quit() },
         ])
@@ -148,6 +152,60 @@ ipcMain.handle('config-write', (_event, obj) => {
   fs.writeFileSync(configFile(), JSON.stringify(obj, null, 2), 'utf8');
   return true;
 });
+
+// ---- 全局快捷键设置：Alt+Q / Ctrl+Q（存 userData config.json 的 hotkey 字段，默认 alt+q） ----
+function getHotkey() {
+  try {
+    const obj = JSON.parse(fs.readFileSync(configFile(), 'utf8'));
+    return obj.hotkey === 'ctrl+q' ? 'ctrl+q' : 'alt+q';
+  } catch (err) {
+    return 'alt+q';
+  }
+}
+function setHotkey(value) {
+  migrateConfig();
+  const file = configFile();
+  try {
+    const obj = JSON.parse(fs.readFileSync(file, 'utf8'));
+    obj.hotkey = value;
+    fs.writeFileSync(file, JSON.stringify(obj, null, 2), 'utf8');
+  } catch (err) {
+    fs.writeFileSync(file, JSON.stringify({ hotkey: value }, null, 2), 'utf8');
+  }
+}
+function applyHotkey() {
+  globalShortcut.unregisterAll();
+  const acc = getHotkey() === 'ctrl+q' ? 'Ctrl+Q' : 'Alt+Q';
+  if (!globalShortcut.register(acc, toggleWindow)) {
+    console.error('全局快捷键 ' + acc + ' 注册失败（可能被其他程序占用）');
+  }
+}
+function hotkeySubmenu() {
+  const current = getHotkey();
+  return {
+    label: '全局快捷键',
+    submenu: [
+      {
+        label: 'Alt+Q',
+        type: 'radio',
+        checked: current === 'alt+q',
+        click: () => {
+          setHotkey('alt+q');
+          applyHotkey();
+        },
+      },
+      {
+        label: 'Ctrl+Q',
+        type: 'radio',
+        checked: current === 'ctrl+q',
+        click: () => {
+          setHotkey('ctrl+q');
+          applyHotkey();
+        },
+      },
+    ],
+  };
+}
 
 // ---- 配置导入 / 导出（原生文件对话框） ----
 async function exportConfig() {
@@ -275,11 +333,8 @@ app.whenReady().then(() => {
   app.setAppUserModelId('com.wengyubin.leekfundfloat'); // 打包版系统通知正确显示
   createWindow();
   createTray();
-
-  // 全局快捷键 Alt+Q：显示/隐藏切换
-  if (!globalShortcut.register('Alt+Q', toggleWindow)) {
-    console.error('全局快捷键 Alt+Q 注册失败（可能被其他程序占用）');
-  }
+  // 全局快捷键（Alt+Q / Ctrl+Q，托盘/窗口右键菜单可切换）
+  applyHotkey();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
