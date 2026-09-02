@@ -1059,6 +1059,7 @@ function drawMinute(ctx, w, h, data, total, prevVol) {
 
   // 均价线（黄色）
   const lotFactor = calcLotFactor(points);
+  const avgPcts = new Array(points.length).fill(null);
   if (lotFactor) {
     ctx.strokeStyle = C_AVG;
     ctx.lineWidth = 1;
@@ -1067,6 +1068,7 @@ function drawMinute(ctx, w, h, data, total, prevVol) {
     points.forEach((p, i) => {
       if (!p.volume || !p.amount) return;
       const avgPct = (p.amount / p.volume / lotFactor / prevClose - 1) * 100;
+      avgPcts[i] = avgPct;
       if (!started) {
         ctx.moveTo(toX(i), toY(avgPct));
         started = true;
@@ -1138,6 +1140,8 @@ function drawMinute(ctx, w, h, data, total, prevVol) {
     chartH,
     volBase,
     prevClose,
+    pcts: pcts.map((p) => (p.price / prevClose - 1) * 100),
+    avgPcts,
     toX,
     valueOfY: (y) => prevClose * (1 + (midY - y) / scale / 100),
     infoLines: (i) => {
@@ -1308,6 +1312,17 @@ function drawCrosshair(ctx, w, h) {
 
   // 十字横线左侧显示涨跌百分比，右侧显示该位置价格（分时/K线通用）
   const price = g.valueOfY(cy);
+
+  // 分时线 与 分时均线 的差距（显示在 Y 轴上方，随十字坐标更新）
+  if (g.mode === 'minute' && g.avgPcts && g.avgPcts[i] != null && g.pcts && g.pcts[i] != null) {
+    const gap = g.pcts[i] - g.avgPcts[i];
+    const gapLabel = `Δ ${gap >= 0 ? '+' : ''}${gap.toFixed(2)}%`;
+    const gw = gapLabel.length * 7;
+    ctx.fillStyle = 'rgba(16,16,20,0.85)';
+    ctx.fillRect(2, 2, gw + 8, 14);
+    ctx.fillStyle = gap >= 0 ? '#f0c828' : '#6fb1ff';
+    ctx.fillText(gapLabel, 6, 13);
+  }
   const prevClose = g.prevClose;
   const pct = prevClose > 0 ? (price / prevClose - 1) * 100 : 0;
   const pctLabel = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
