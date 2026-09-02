@@ -30,13 +30,15 @@
       "signAndEditExecutable": false
     },
     "portable": {
-      "artifactName": "leek-float-${version}.exe"
+      "artifactName": "leek-float-${version}-win.exe"
     },
     "mac": {
       "target": [
-        "zip"
+        "dmg"
       ],
-      "category": "public.app-category.finance"
+      "category": "public.app-category.finance",
+      "identity": null,
+      "artifactName": "leek-float-${version}-mac.dmg"
     }
   },
   "dependencies": {
