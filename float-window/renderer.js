@@ -1140,7 +1140,7 @@ function drawMinute(ctx, w, h, data, total, prevVol) {
     chartH,
     volBase,
     prevClose,
-    pcts: pcts.map((p) => (p.price / prevClose - 1) * 100),
+    pcts,
     avgPcts,
     toX,
     valueOfY: (y) => prevClose * (1 + (midY - y) / scale / 100),
