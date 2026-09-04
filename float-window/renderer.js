@@ -41,6 +41,7 @@ ipcRenderer.on('config-reloaded', async () => {
   cfg.groupStocks = c.groupStocks || [];
   cfg.alerts = c.alerts || [];
   cfg.drawings = c.drawings || [];
+  warningGroupReady = false;
   alertPrev.clear();
   alertSatisfied.clear();
   alertGroupSyncKey = '';
@@ -214,6 +215,7 @@ function render(quotes) {
 const alertTriggered = new Set(); // 当日已触发的预警 key（只触发一次）
 const alertPrev = new Map(); // 预警 key -> 上一 tick 的关系差值（价格-均线 / MA1-MA2 / 价格-阈值）
 const alertSatisfied = new Map(); // 预警 key -> 条件当前是否成立，用于自动分组
+const WARNING_GROUP = 'warning';
 let alertCheckDay = '';
 const dayClosesCache = new Map(); // code -> { closes: [..], day: 'YYYY-MM-DD' }
 
@@ -285,37 +287,49 @@ function evaluateAlerts(quotes) {
     alertSatisfied.set(key, isUp ? cur > 0 : cur < 0);
     evaluated.push(al);
   }
-  syncAlertGroups(evaluated);
+  syncWarningGroup(evaluated);
 }
 let alertGroupSyncKey = '';
-function syncAlertGroups(evaluated) {
-  const managedGroups = new Set(evaluated.map((a) => a.autoGroup).filter(Boolean));
-  if (!managedGroups.size) return;
-  const shouldContain = new Map();
-  managedGroups.forEach((group) => shouldContain.set(group, new Set()));
+function syncWarningGroup(evaluated) {
+  if (!evaluated.length) return;
+  const shouldContain = new Set();
   for (const al of cfg.alerts || []) {
-    if (shouldContain.has(al.autoGroup) && alertSatisfied.get(alertKey(al))) {
-      shouldContain.get(al.autoGroup).add(al.code);
-    }
+    if (alertSatisfied.get(alertKey(al))) shouldContain.add(al.code);
   }
-  const syncKey = [...shouldContain].map(([g, codes]) => `${g}:${[...codes].sort().join(',')}`).join('|');
+  const syncKey = [...shouldContain].sort().join(',');
   if (syncKey === alertGroupSyncKey) return;
   alertGroupSyncKey = syncKey;
   writeLeekConfig((obj) => {
     const groups = obj.groups || [];
     const arrs = obj.groupStocks || [];
-    for (const [group, wanted] of shouldContain) {
-      const gi = groups.indexOf(group);
-      if (gi < 0) continue;
-      // 自动分组由预警完全托管：成立时加入，失效时移出。
-      arrs[gi] = [...wanted];
-    }
+    const gi = groups.indexOf(WARNING_GROUP);
+    if (gi < 0) return;
+    // warning 分组由预警完全托管：成立时加入，失效时移出。
+    arrs[gi] = [...shouldContain];
     obj.groupStocks = arrs;
   }).then(() => {
     if (lastQuotes) render(lastQuotes);
   }).catch(() => {
     alertGroupSyncKey = '';
   });
+}
+let warningGroupReady = false;
+async function ensureWarningGroup() {
+  if (warningGroupReady || cfg.groups.includes(WARNING_GROUP)) {
+    warningGroupReady = true;
+    return;
+  }
+  await writeLeekConfig((obj) => {
+    const groups = obj.groups || [];
+    const arrs = obj.groupStocks || [];
+    if (!groups.includes(WARNING_GROUP)) {
+      groups.push(WARNING_GROUP);
+      arrs.push([]);
+    }
+    obj.groups = groups;
+    obj.groupStocks = arrs;
+  });
+  warningGroupReady = true;
 }
 function fireAlert(al, price) {
   const key = alertKey(al);
@@ -449,6 +463,7 @@ function visibleStockCodes() {
 }
 
 async function tick() {
+  await ensureWarningGroup();
   const codes = [...new Set([...cfg.stocks, ...cfg.groupStocks.flat()])];
   if (!codes.length) {
     render([]);
@@ -909,15 +924,7 @@ function alertFormToObj() {
     maN: parseInt(document.getElementById('alertMaN').value, 10) || 5,
     maM: parseInt(document.getElementById('alertMaM').value, 10) || 10,
     value: parseFloat(document.getElementById('alertValue').value),
-    autoGroup: document.getElementById('alertGroup').value || '',
   };
-}
-function renderAlertGroups(selected = '') {
-  const el = document.getElementById('alertGroup');
-  el.innerHTML = '<option value="">不自动归组</option>' + (cfg.groups || [])
-    .map((g) => `<option value="${g.replace(/"/g, '&quot;')}">${g}</option>`)
-    .join('');
-  el.value = selected || '';
 }
 function syncAlertFields() {
   const type = alertTypeEl.value;
@@ -935,7 +942,7 @@ function renderAlertList() {
   listEl.innerHTML = mine
     .map(
       (a, i) =>
-        `<div class="alert-item"><span>${alertLabel(a)}${a.autoGroup ? ` → ${a.autoGroup}` : ''}</span><span class="del" data-i="${i}">✕</span></div>`
+        `<div class="alert-item"><span>${alertLabel(a)}</span><span class="del" data-i="${i}">✕</span></div>`
     )
     .join('');
   listEl.querySelectorAll('.del').forEach((d) => {
@@ -951,7 +958,6 @@ function openAlertPanel(code, name, initialValue) {
   document.getElementById('alertStockName').textContent = `${name} ${code}`;
   alertTypeEl.value = 'cross_ma_up';
   document.getElementById('alertValue').value = initialValue == null ? '' : Number(initialValue).toFixed(3);
-  renderAlertGroups();
   syncAlertFields();
   renderAlertList();
   alertPanelEl.style.display = 'block';
@@ -974,7 +980,7 @@ document.getElementById('alertSave').addEventListener('click', () => {
   writeLeekConfig((obj) => {
     const arr = obj.alerts || [];
     const dup = arr.some(
-      (a) => a.code === al.code && a.type === al.type && a.maN === al.maN && a.maM === al.maM && a.value === al.value && (a.autoGroup || '') === al.autoGroup
+      (a) => a.code === al.code && a.type === al.type && a.maN === al.maN && a.maM === al.maM && a.value === al.value
     );
     if (!dup) {
       arr.push(al);
