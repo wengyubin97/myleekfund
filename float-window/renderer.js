@@ -42,6 +42,8 @@ ipcRenderer.on('config-reloaded', async () => {
   cfg.alerts = c.alerts || [];
   cfg.drawings = c.drawings || [];
   alertPrev.clear();
+  alertSatisfied.clear();
+  alertGroupSyncKey = '';
   alertTriggered.clear();
   tick();
 });
@@ -211,6 +213,7 @@ function render(quotes) {
 // ---- 股价预警 ----
 const alertTriggered = new Set(); // 当日已触发的预警 key（只触发一次）
 const alertPrev = new Map(); // 预警 key -> 上一 tick 的关系差值（价格-均线 / MA1-MA2 / 价格-阈值）
+const alertSatisfied = new Map(); // 预警 key -> 条件当前是否成立，用于自动分组
 let alertCheckDay = '';
 const dayClosesCache = new Map(); // code -> { closes: [..], day: 'YYYY-MM-DD' }
 
@@ -258,6 +261,7 @@ async function ensureDayCloses(codes) {
 function evaluateAlerts(quotes) {
   if (!cfg.alerts || !cfg.alerts.length) return;
   const priceMap = new Map(quotes.map((q) => [q.code, q.price]));
+  const evaluated = [];
   for (const al of cfg.alerts) {
     const price = priceMap.get(al.code);
     if (price === undefined || !dayClosesCache.has(al.code)) continue;
@@ -278,7 +282,40 @@ function evaluateAlerts(quotes) {
       fireAlert(al, price);
     }
     alertPrev.set(key, cur);
+    alertSatisfied.set(key, isUp ? cur > 0 : cur < 0);
+    evaluated.push(al);
   }
+  syncAlertGroups(evaluated);
+}
+let alertGroupSyncKey = '';
+function syncAlertGroups(evaluated) {
+  const managedGroups = new Set(evaluated.map((a) => a.autoGroup).filter(Boolean));
+  if (!managedGroups.size) return;
+  const shouldContain = new Map();
+  managedGroups.forEach((group) => shouldContain.set(group, new Set()));
+  for (const al of cfg.alerts || []) {
+    if (shouldContain.has(al.autoGroup) && alertSatisfied.get(alertKey(al))) {
+      shouldContain.get(al.autoGroup).add(al.code);
+    }
+  }
+  const syncKey = [...shouldContain].map(([g, codes]) => `${g}:${[...codes].sort().join(',')}`).join('|');
+  if (syncKey === alertGroupSyncKey) return;
+  alertGroupSyncKey = syncKey;
+  writeLeekConfig((obj) => {
+    const groups = obj.groups || [];
+    const arrs = obj.groupStocks || [];
+    for (const [group, wanted] of shouldContain) {
+      const gi = groups.indexOf(group);
+      if (gi < 0) continue;
+      // 自动分组由预警完全托管：成立时加入，失效时移出。
+      arrs[gi] = [...wanted];
+    }
+    obj.groupStocks = arrs;
+  }).then(() => {
+    if (lastQuotes) render(lastQuotes);
+  }).catch(() => {
+    alertGroupSyncKey = '';
+  });
 }
 function fireAlert(al, price) {
   const key = alertKey(al);
@@ -294,6 +331,9 @@ function resetAlertDay() {
   if (alertCheckDay !== today) {
     alertCheckDay = today;
     alertTriggered.clear();
+    alertPrev.clear();
+    alertSatisfied.clear();
+    alertGroupSyncKey = '';
   }
 }
 
@@ -590,6 +630,9 @@ function deleteGroup(name) {
     });
     groups.splice(gi, 1);
     arrs.splice(gi, 1);
+    obj.alerts = (obj.alerts || []).map((a) =>
+      a.autoGroup === name ? { ...a, autoGroup: '' } : a
+    );
     delete uiState.collapsed[name];
     saveUIState();
   }).then(() => tick());
@@ -747,6 +790,9 @@ addInput.addEventListener('keydown', (e) => {
       if (gi < 0) return;
       groups[gi] = newName;
       obj.groups = groups;
+      obj.alerts = (obj.alerts || []).map((a) =>
+        a.autoGroup === oldName ? { ...a, autoGroup: newName } : a
+      );
       // 同步折叠/置顶状态里的旧组名引用
       if (uiState.collapsed[oldName] !== undefined) {
         uiState.collapsed[newName] = uiState.collapsed[oldName];
@@ -854,6 +900,7 @@ document.getElementById('btnSparkSet').addEventListener('click', () => {
 const alertPanelEl = document.getElementById('alertPanel');
 const alertTypeEl = document.getElementById('alertType');
 let alertCode = null;
+let alertReturnChart = false;
 function alertFormToObj() {
   const type = alertTypeEl.value;
   return {
@@ -862,7 +909,15 @@ function alertFormToObj() {
     maN: parseInt(document.getElementById('alertMaN').value, 10) || 5,
     maM: parseInt(document.getElementById('alertMaM').value, 10) || 10,
     value: parseFloat(document.getElementById('alertValue').value),
+    autoGroup: document.getElementById('alertGroup').value || '',
   };
+}
+function renderAlertGroups(selected = '') {
+  const el = document.getElementById('alertGroup');
+  el.innerHTML = '<option value="">不自动归组</option>' + (cfg.groups || [])
+    .map((g) => `<option value="${g.replace(/"/g, '&quot;')}">${g}</option>`)
+    .join('');
+  el.value = selected || '';
 }
 function syncAlertFields() {
   const type = alertTypeEl.value;
@@ -880,7 +935,7 @@ function renderAlertList() {
   listEl.innerHTML = mine
     .map(
       (a, i) =>
-        `<div class="alert-item"><span>${alertLabel(a)}</span><span class="del" data-i="${i}">✕</span></div>`
+        `<div class="alert-item"><span>${alertLabel(a)}${a.autoGroup ? ` → ${a.autoGroup}` : ''}</span><span class="del" data-i="${i}">✕</span></div>`
     )
     .join('');
   listEl.querySelectorAll('.del').forEach((d) => {
@@ -890,19 +945,25 @@ function renderAlertList() {
     });
   });
 }
-function openAlertPanel(code, name) {
+function openAlertPanel(code, name, initialValue) {
   alertCode = code;
+  alertReturnChart = !!chartCode;
   document.getElementById('alertStockName').textContent = `${name} ${code}`;
   alertTypeEl.value = 'cross_ma_up';
+  document.getElementById('alertValue').value = initialValue == null ? '' : Number(initialValue).toFixed(3);
+  renderAlertGroups();
   syncAlertFields();
   renderAlertList();
   alertPanelEl.style.display = 'block';
   document.getElementById('list').style.display = 'none';
+  if (alertReturnChart) chartView.classList.remove('show');
 }
 function closeAlertPanel() {
   alertPanelEl.style.display = 'none';
-  document.getElementById('list').style.display = '';
+  if (alertReturnChart && chartCode) chartView.classList.add('show');
+  else document.getElementById('list').style.display = '';
   alertCode = null;
+  alertReturnChart = false;
   if (lastQuotes) render(lastQuotes);
 }
 document.getElementById('alertClose').addEventListener('click', closeAlertPanel);
@@ -913,7 +974,7 @@ document.getElementById('alertSave').addEventListener('click', () => {
   writeLeekConfig((obj) => {
     const arr = obj.alerts || [];
     const dup = arr.some(
-      (a) => a.code === al.code && a.type === al.type && a.maN === al.maN && a.maM === al.maM && a.value === al.value
+      (a) => a.code === al.code && a.type === al.type && a.maN === al.maN && a.maM === al.maM && a.value === al.value && (a.autoGroup || '') === al.autoGroup
     );
     if (!dup) {
       arr.push(al);
@@ -921,6 +982,8 @@ document.getElementById('alertSave').addEventListener('click', () => {
     }
   }).then(() => {
     alertPrev.clear();
+    alertSatisfied.clear();
+    alertGroupSyncKey = '';
     renderAlertList();
   });
 });
@@ -929,6 +992,17 @@ document.getElementById('alertDel').addEventListener('click', () => {
   if (!al.code) return;
   deleteAlert(al);
 });
+
+document.getElementById('chartAlert').addEventListener('click', () => {
+  if (!chartCode) return;
+  let value;
+  if (chartHover && lastGeom) value = lastGeom.valueOfY(chartHover.y);
+  else if (lastQuotes) {
+    const q = lastQuotes.find((x) => x.code === chartCode);
+    if (q) value = q.price;
+  }
+  openAlertPanel(chartCode, chartName, value);
+});
 function deleteAlert(al) {
   writeLeekConfig((obj) => {
     obj.alerts = (obj.alerts || []).filter(
@@ -936,6 +1010,8 @@ function deleteAlert(al) {
     );
   }).then(() => {
     alertPrev.clear();
+    alertSatisfied.clear();
+    alertGroupSyncKey = '';
     alertTriggered.clear();
     renderAlertList();
     if (lastQuotes) render(lastQuotes);

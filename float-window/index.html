@@ -343,6 +343,7 @@
             <option value="month">月K</option>
           </select>
         </span>
+        <button id="chartAlert" title="按当前图表设置预警">🔔</button>
       </div>
       <canvas id="chartCanvas"></canvas>
       <div id="chartInfo"></div>
@@ -371,6 +372,9 @@
       <label id="alertMaRow">均线周期 <input id="alertMaN" type="number" min="2" max="120" value="5" /></label>
       <label id="alertMaMRow">第二周期 <input id="alertMaM" type="number" min="2" max="120" value="10" /></label>
       <label id="alertValueRow">阈值 <input id="alertValue" type="number" step="0.001" placeholder="价格" /></label>
+      <label>触发后归组
+        <select id="alertGroup"><option value="">不自动归组</option></select>
+      </label>
       <div class="alert-btns"><button id="alertSave">保存预警</button><button id="alertDel">删除该条件</button></div>
       <div id="alertList"></div>
     </div>
@@ -380,7 +384,8 @@
       <p><b>分组管理</b>：悬停分组标题行——📌 置顶、✏️ 重命名；点击标题折叠/展开（状态自动保存）。</p>
       <p><b>排序</b>：标题栏「组」按平均涨跌幅降序、「股」按涨跌幅降序，再点恢复默认。</p>
       <p><b>分时缩略图</b>：每行内嵌当日分时图（0轴上方黄、下方蓝），每 5 秒刷新；底部 ⚙ 可调宽/高/缩放（缩放=放大最近区间，Y轴自动适配）。</p>
-      <p><b>图表</b>：点击任意个股打开分时图/K线；顶部下拉可切换 1/5/15/60/120 分钟、日/周/月 K。滚轮缩放时间轴、按住拖动平移、鼠标悬停显示十字坐标与数据。← 或 Esc 返回列表。</p>
+      <p><b>图表与预警</b>：点击任意个股打开分时图/K线；顶部下拉可切换 1/5/15/60/120 分钟、日/周/月 K。滚轮缩放时间轴、按住拖动平移、鼠标悬停显示十字坐标与数据；点击右上角🔔可直接按当前图表价位设置预警。← 或 Esc 返回列表。</p>
+      <p><b>自动分组</b>：先用「+组」创建分组，再在预警面板选择「触发后归组」；条件成立时个股自动加入该组，条件失效且没有其它相关预警成立时自动移出。</p>
       <p><b>显示</b>：底部滑杆调窗口透明度；标题栏「黑白」切换灰度模式。</p>
       <p><b>托盘 / 快捷键</b>：Alt+Q 显示/隐藏悬浮窗；系统托盘左键切换、右键菜单退出；窗口内右键菜单可刷新。</p>
       <p><b>配置</b>：股票与分组数据保存在本地 userData 配置，不依赖 VSCode，随 exe 直接可用。</p>
